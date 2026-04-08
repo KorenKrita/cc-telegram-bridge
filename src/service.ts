@@ -411,6 +411,10 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
+function isConflictError(error: unknown): boolean {
+  return error instanceof Error && /409\s*Conflict/i.test(error.message);
+}
+
 export async function processTelegramUpdates(
   updates: unknown[],
   context: TelegramServiceContext,
@@ -511,13 +515,14 @@ export async function pollTelegramUpdatesOnce(
   logger: Pick<Console, "error"> = console,
   offset?: number,
   signal?: AbortSignal,
-): Promise<{ offset: number | undefined; hadFetchError: boolean; hadUpdates: boolean }> {
+): Promise<{ offset: number | undefined; hadFetchError: boolean; hadUpdates: boolean; conflict: boolean }> {
   try {
     const updates = await api.getUpdates(offset, signal);
     return {
       offset: await processTelegramUpdates(updates, { api, bridge, inboxDir }, logger),
       hadFetchError: false,
       hadUpdates: updates.length > 0,
+      conflict: false,
     };
   } catch (error) {
     if (isAbortError(error)) {
@@ -525,6 +530,17 @@ export async function pollTelegramUpdatesOnce(
         offset,
         hadFetchError: false,
         hadUpdates: false,
+        conflict: false,
+      };
+    }
+
+    if (isConflictError(error)) {
+      logger.error("409 Conflict: another process is polling this bot token. Shutting down to avoid duplicate replies.");
+      return {
+        offset,
+        hadFetchError: true,
+        hadUpdates: false,
+        conflict: true,
       };
     }
 
@@ -533,6 +549,7 @@ export async function pollTelegramUpdatesOnce(
       offset,
       hadFetchError: true,
       hadUpdates: false,
+      conflict: false,
     };
   }
 }
@@ -552,6 +569,10 @@ export async function pollTelegramUpdates(
     const previousOffset = offset;
     const result = await pollTelegramUpdatesOnce(api, bridge, inboxDir, logger, offset, signal);
     offset = result.offset;
+
+    if (result.conflict) {
+      break;
+    }
 
     if (result.hadFetchError) {
       backoffMs = Math.min(backoffMs * 2, maxBackoffMs);

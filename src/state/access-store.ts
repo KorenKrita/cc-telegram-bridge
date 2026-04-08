@@ -1,0 +1,109 @@
+import { randomInt } from "node:crypto";
+
+import { JsonStore } from "./json-store.js";
+import type { AccessState, PairedUser, PendingPair } from "../types.js";
+
+export const DEFAULT_ACCESS_STATE: AccessState = {
+  policy: "pairing",
+  pairedUsers: [],
+  allowlist: [],
+  pendingPairs: [],
+};
+
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const CODE_LENGTH = 6;
+const PAIRING_TTL_MS = 5 * 60 * 1000;
+
+function generateCode(): string {
+  let code = "";
+
+  for (let index = 0; index < CODE_LENGTH; index++) {
+    code += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
+  }
+
+  return code;
+}
+
+function isAccessState(value: unknown): value is AccessState {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as Partial<AccessState>;
+  return (
+    (candidate.policy === "pairing" || candidate.policy === "allowlist") &&
+    Array.isArray(candidate.pairedUsers) &&
+    Array.isArray(candidate.allowlist) &&
+    Array.isArray(candidate.pendingPairs)
+  );
+}
+
+export class AccessStore {
+  private readonly store: JsonStore<AccessState>;
+
+  constructor(filePath: string) {
+    this.store = new JsonStore<AccessState>(filePath, (value) => {
+      if (isAccessState(value)) {
+        return value;
+      }
+
+      throw new Error("invalid access state");
+    });
+  }
+
+  async load(): Promise<AccessState> {
+    return this.store.read(DEFAULT_ACCESS_STATE);
+  }
+
+  async issuePairingCode({
+    telegramUserId,
+    telegramChatId,
+    now,
+  }: {
+    telegramUserId: number;
+    telegramChatId: number;
+    now: Date;
+  }): Promise<PendingPair> {
+    const state = await this.load();
+    const pendingPair: PendingPair = {
+      code: generateCode(),
+      telegramUserId,
+      telegramChatId,
+      expiresAt: new Date(now.getTime() + PAIRING_TTL_MS).toISOString(),
+    };
+
+    state.pendingPairs = state.pendingPairs.filter((pair) => pair.telegramUserId !== telegramUserId);
+    state.pendingPairs.push(pendingPair);
+
+    await this.store.write(state);
+    return pendingPair;
+  }
+
+  async redeemPairingCode(code: string, now: Date): Promise<PairedUser | null> {
+    const state = await this.load();
+    const pendingPair = state.pendingPairs.find((pair) => pair.code === code);
+
+    if (!pendingPair) {
+      return null;
+    }
+
+    state.pendingPairs = state.pendingPairs.filter((pair) => pair.code !== code);
+
+    if (new Date(pendingPair.expiresAt).getTime() <= now.getTime()) {
+      await this.store.write(state);
+      return null;
+    }
+
+    const pairedUser: PairedUser = {
+      telegramUserId: pendingPair.telegramUserId,
+      telegramChatId: pendingPair.telegramChatId,
+      pairedAt: now.toISOString(),
+    };
+
+    state.pairedUsers.push(pairedUser);
+    state.allowlist = [...new Set([...state.allowlist, pendingPair.telegramChatId])];
+
+    await this.store.write(state);
+    return pairedUser;
+  }
+}

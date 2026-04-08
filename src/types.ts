@@ -1,5 +1,25 @@
 export type AccessPolicy = "pairing" | "allowlist";
 
+export interface PairedUser {
+  telegramUserId: number;
+  telegramChatId: number;
+  pairedAt: string;
+}
+
+export interface PendingPair {
+  code: string;
+  telegramUserId: number;
+  telegramChatId: number;
+  expiresAt: string;
+}
+
+export interface AccessState {
+  policy: AccessPolicy;
+  pairedUsers: PairedUser[];
+  allowlist: number[];
+  pendingPairs: PendingPair[];
+}
+
 export interface AppConfig {
   telegramBotToken: string;
   stateDir: string;

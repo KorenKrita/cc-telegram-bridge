@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { resolveConfig, resolveInstanceStateDir, type EnvSource } from "./config.js";
@@ -137,6 +137,7 @@ export async function resolveServiceEnvForInstance(env: EnvSource, instanceName:
   const baseEnv: {
     HOME?: string;
     USERPROFILE?: string;
+    CODEX_HOME?: string;
     CODEX_TELEGRAM_INSTANCE: string;
     CODEX_TELEGRAM_STATE_DIR?: string;
     CODEX_EXECUTABLE?: string;
@@ -144,6 +145,7 @@ export async function resolveServiceEnvForInstance(env: EnvSource, instanceName:
   } = {
     HOME: env.HOME,
     USERPROFILE: env.USERPROFILE,
+    CODEX_HOME: env.CODEX_HOME,
     CODEX_TELEGRAM_INSTANCE: normalizedInstanceName,
     CODEX_TELEGRAM_STATE_DIR: env.CODEX_TELEGRAM_STATE_DIR,
     CODEX_EXECUTABLE: env.CODEX_EXECUTABLE,
@@ -168,6 +170,56 @@ export async function resolveServiceEnvForInstance(env: EnvSource, instanceName:
     ...baseEnv,
     TELEGRAM_BOT_TOKEN: telegramBotToken,
   };
+}
+
+function resolveSharedCodexHome(env: Pick<EnvSource, "HOME" | "USERPROFILE" | "CODEX_HOME">): string | null {
+  if (env.CODEX_HOME?.trim()) {
+    return env.CODEX_HOME.trim();
+  }
+
+  const homeDir = process.platform === "win32" ? env.USERPROFILE ?? env.HOME : env.HOME ?? env.USERPROFILE;
+  if (!homeDir) {
+    return null;
+  }
+
+  return path.join(homeDir, ".codex");
+}
+
+async function copyIfExists(sourcePath: string, destinationPath: string): Promise<void> {
+  try {
+    await copyFile(sourcePath, destinationPath);
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+async function seedIsolatedCodexHome(
+  env: Pick<EnvSource, "HOME" | "USERPROFILE" | "CODEX_HOME">,
+  engineHomePath: string,
+): Promise<void> {
+  const sharedCodexHome = resolveSharedCodexHome(env);
+  if (!sharedCodexHome) {
+    return;
+  }
+
+  if (path.resolve(sharedCodexHome) === path.resolve(engineHomePath)) {
+    return;
+  }
+
+  await mkdir(engineHomePath, { recursive: true });
+  await Promise.all([
+    copyIfExists(path.join(sharedCodexHome, "auth.json"), path.join(engineHomePath, "auth.json")),
+    copyIfExists(path.join(sharedCodexHome, "config.toml"), path.join(engineHomePath, "config.toml")),
+  ]);
 }
 
 export type EngineType = "codex" | "claude";
@@ -205,7 +257,7 @@ export function resolveEngineRuntime(engine: EngineType, approvalMode: ApprovalM
     return "process";
   }
 
-  return approvalMode === "normal" ? "app-server" : "process";
+  return "process";
 }
 
 function resolveClaudeExecutable(env: EnvSource): string {
@@ -258,7 +310,7 @@ async function createAdapter(
 
   if (resolveEngineRuntime(engine, approvalMode) === "app-server") {
     const engineHomePath = path.join(config.stateDir, "engine-home");
-    await mkdir(engineHomePath, { recursive: true });
+    await seedIsolatedCodexHome(env, engineHomePath);
     return new CodexAppServerAdapter(
       config.codexExecutable,
       process.cwd(),
@@ -270,7 +322,7 @@ async function createAdapter(
   }
 
   const engineHomePath = path.join(config.stateDir, "engine-home");
-  await mkdir(engineHomePath, { recursive: true });
+  await seedIsolatedCodexHome(env, engineHomePath);
   return new ProcessCodexAdapter(config.codexExecutable, undefined, undefined, instructionsPath, configPath, engineHomePath);
 }
 

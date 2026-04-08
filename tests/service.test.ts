@@ -118,9 +118,41 @@ describe("createServiceDependenciesForInstance", () => {
         "alpha",
       );
 
-      expect((result.bridge as any).adapter).toBeInstanceOf(CodexAppServerAdapter);
+      expect((result.bridge as any).adapter).toBeInstanceOf(ProcessCodexAdapter);
       expect((result.bridge as any).adapter.childEnv.CODEX_HOME).toBe(
         path.join(root, ".codex", "channels", "telegram", "alpha", "engine-home"),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("copies shared Codex auth files into the isolated engine home", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const stateDir = path.join(root, ".codex", "channels", "telegram", "alpha");
+    const envPath = path.join(stateDir, ".env");
+    const authPath = path.join(root, ".codex", "auth.json");
+    const configTomlPath = path.join(root, ".codex", "config.toml");
+
+    try {
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(envPath, 'TELEGRAM_BOT_TOKEN="secret-token"\n', "utf8");
+      await writeFile(authPath, '{"access_token":"shared-token"}\n', "utf8");
+      await writeFile(configTomlPath, 'model = "gpt-5.3-codex"\n', "utf8");
+
+      await createServiceDependenciesForInstance(
+        {
+          USERPROFILE: root,
+          CODEX_EXECUTABLE: "codex",
+        },
+        "alpha",
+      );
+
+      await expect(readFile(path.join(stateDir, "engine-home", "auth.json"), "utf8")).resolves.toBe(
+        '{"access_token":"shared-token"}\n',
+      );
+      await expect(readFile(path.join(stateDir, "engine-home", "config.toml"), "utf8")).resolves.toBe(
+        'model = "gpt-5.3-codex"\n',
       );
     } finally {
       await rm(root, { recursive: true, force: true });

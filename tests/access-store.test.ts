@@ -59,6 +59,30 @@ describe("AccessStore", () => {
     }
   });
 
+  it("updates policy, allowlist, and status summaries", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    try {
+      const store = new AccessStore(path.join(dir, "access.json"));
+
+      await store.setPolicy("allowlist");
+      await store.allowChat(123);
+      await store.allowChat(456);
+      await store.allowChat(123);
+      await store.revokeChat(456);
+
+      const status = await store.getStatus();
+
+      expect(status).toEqual({
+        policy: "allowlist",
+        pairedUsers: 0,
+        allowlist: [123],
+        pendingPairs: [],
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("persists pairing codes and paired users", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     try {

@@ -15,6 +15,20 @@ export interface PersistedInstanceToken {
   envPath: string;
 }
 
+export function resolveInstanceAccessStatePath(
+  env: Pick<InstanceTokenEnv, "USERPROFILE" | "CODEX_TELEGRAM_STATE_DIR">,
+  instanceName: string,
+): string {
+  const normalizedInstanceName = normalizeInstanceName(instanceName);
+  const stateDir = resolveInstanceStateDir({
+    USERPROFILE: env.USERPROFILE,
+    CODEX_TELEGRAM_STATE_DIR: env.CODEX_TELEGRAM_STATE_DIR,
+    CODEX_TELEGRAM_INSTANCE: normalizedInstanceName,
+  });
+
+  return joinStatePath(stateDir, "access.json");
+}
+
 export async function writeInstanceBotToken(
   env: InstanceTokenEnv,
   instanceName: string,

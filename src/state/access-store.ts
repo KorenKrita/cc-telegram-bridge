@@ -1,7 +1,7 @@
 import { randomInt } from "node:crypto";
 
 import { JsonStore } from "./json-store.js";
-import type { AccessState, PairedUser, PendingPair } from "../types.js";
+import type { AccessPolicy, AccessState, PairedUser, PendingPair } from "../types.js";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_LENGTH = 6;
@@ -97,6 +97,44 @@ export class AccessStore {
 
   async load(): Promise<AccessState> {
     return this.store.read(createDefaultAccessState());
+  }
+
+  async setPolicy(policy: AccessPolicy): Promise<void> {
+    const state = await this.load();
+    state.policy = policy;
+    await this.store.write(state);
+  }
+
+  async allowChat(chatId: number): Promise<void> {
+    const state = await this.load();
+    state.allowlist = [...new Set([...state.allowlist, chatId])];
+    await this.store.write(state);
+  }
+
+  async revokeChat(chatId: number): Promise<void> {
+    const state = await this.load();
+    state.allowlist = state.allowlist.filter((entry) => entry !== chatId);
+    await this.store.write(state);
+  }
+
+  async getStatus(): Promise<{
+    policy: AccessPolicy;
+    pairedUsers: number;
+    allowlist: number[];
+    pendingPairs: { code: string; telegramChatId: number; expiresAt: string }[];
+  }> {
+    const state = await this.load();
+
+    return {
+      policy: state.policy,
+      pairedUsers: state.pairedUsers.length,
+      allowlist: [...state.allowlist],
+      pendingPairs: state.pendingPairs.map(({ code, telegramChatId, expiresAt }) => ({
+        code,
+        telegramChatId,
+        expiresAt,
+      })),
+    };
   }
 
   async issuePairingCode({

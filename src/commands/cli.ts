@@ -1,6 +1,6 @@
-import type { InstanceTokenEnv } from "./access.js";
-import { writeInstanceBotToken } from "./access.js";
+import { AccessStore } from "../state/access-store.js";
 import { normalizeInstanceName } from "../instance.js";
+import { resolveInstanceAccessStatePath, type InstanceTokenEnv, writeInstanceBotToken } from "./access.js";
 
 export interface CliLogger {
   log: (message: string) => void;
@@ -19,6 +19,34 @@ function normalizeCommandArgs(argv: string[]): string[] {
   return argv;
 }
 
+function extractInstanceOption(argv: string[]): { instanceName: string; args: string[] } {
+  let instanceName = "default";
+  const args: string[] = [];
+
+  for (let index = 0; index < argv.length; index++) {
+    const argument = argv[index];
+
+    if (argument === "--instance") {
+      if (index + 1 >= argv.length) {
+        throw new Error("Invalid instance name");
+      }
+
+      instanceName = normalizeInstanceName(argv[index + 1]);
+      index++;
+      continue;
+    }
+
+    if (argument.startsWith("--instance=")) {
+      instanceName = normalizeInstanceName(argument.slice("--instance=".length));
+      continue;
+    }
+
+    args.push(argument);
+  }
+
+  return { instanceName, args };
+}
+
 function parseConfigureCommand(argv: string[]): { instanceName: string; botToken: string } {
   if (argv.length === 2) {
     return { instanceName: "default", botToken: argv[1] };
@@ -34,17 +62,126 @@ function parseConfigureCommand(argv: string[]): { instanceName: string; botToken
   throw new Error("Usage: telegram configure <bot-token> | telegram configure --instance <name> <bot-token>");
 }
 
+function parseChatId(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`Invalid chat id: ${value}`);
+  }
+
+  return parsed;
+}
+
+function formatAccessStatus(instanceName: string, status: Awaited<ReturnType<AccessStore["getStatus"]>>): string {
+  const allowlist = status.allowlist.length > 0 ? status.allowlist.join(", ") : "none";
+  const pendingPairs =
+    status.pendingPairs.length > 0
+      ? status.pendingPairs
+          .map((pair) => `${pair.code} chat ${pair.telegramChatId} expires ${pair.expiresAt}`)
+          .join("; ")
+      : "none";
+
+  return [
+    `Instance: ${instanceName}`,
+    `Policy: ${status.policy}`,
+    `Paired users: ${status.pairedUsers}`,
+    `Allowlist: ${allowlist}`,
+    `Pending pairs: ${pendingPairs}`,
+  ].join("\n");
+}
+
+async function runAccessCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+): Promise<boolean> {
+  if (argv.length < 2) {
+    throw new Error("Usage: telegram access <pair|policy|allow|revoke> ...");
+  }
+
+  const subcommand = argv[1];
+  const { instanceName, args } = extractInstanceOption(argv.slice(2));
+  const store = new AccessStore(resolveInstanceAccessStatePath(env, instanceName));
+
+  if (subcommand === "pair") {
+    if (args.length !== 1) {
+      throw new Error("Usage: telegram access pair [--instance <name>] <code>");
+    }
+
+    const code = args[0];
+    const pairedUser = await store.redeemPairingCode(code, new Date());
+
+    if (!pairedUser) {
+      throw new Error(`Pairing code "${code}" is invalid or expired.`);
+    }
+
+    logger.log(`Redeemed pairing code for instance "${instanceName}" and chat ${pairedUser.telegramChatId}.`);
+    return true;
+  }
+
+  if (subcommand === "policy") {
+    if (args.length !== 1 || (args[0] !== "pairing" && args[0] !== "allowlist")) {
+      throw new Error("Usage: telegram access policy [--instance <name>] <pairing|allowlist>");
+    }
+
+    await store.setPolicy(args[0]);
+    logger.log(`Updated access policy for instance "${instanceName}" to "${args[0]}".`);
+    return true;
+  }
+
+  if (subcommand === "allow") {
+    if (args.length !== 1) {
+      throw new Error("Usage: telegram access allow [--instance <name>] <chat-id>");
+    }
+
+    const chatId = parseChatId(args[0]);
+    await store.allowChat(chatId);
+    logger.log(`Allowed chat ${chatId} for instance "${instanceName}".`);
+    return true;
+  }
+
+  if (subcommand === "revoke") {
+    if (args.length !== 1) {
+      throw new Error("Usage: telegram access revoke [--instance <name>] <chat-id>");
+    }
+
+    const chatId = parseChatId(args[0]);
+    await store.revokeChat(chatId);
+    logger.log(`Revoked chat ${chatId} for instance "${instanceName}".`);
+    return true;
+  }
+
+  throw new Error("Usage: telegram access <pair|policy|allow|revoke> ...");
+}
+
+async function runStatusCommand(argv: string[], env: InstanceTokenEnv, logger: CliLogger): Promise<boolean> {
+  const { instanceName } = extractInstanceOption(argv.slice(1));
+  const store = new AccessStore(resolveInstanceAccessStatePath(env, instanceName));
+  const status = await store.getStatus();
+
+  logger.log(formatAccessStatus(instanceName, status));
+  return true;
+}
+
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<boolean> {
   const normalized = normalizeCommandArgs(argv);
   const logger = options.logger ?? console;
+  const env = options.env ?? process.env;
 
-  if (normalized[0] !== "configure") {
-    return false;
+  if (normalized[0] === "configure") {
+    const { instanceName, botToken } = parseConfigureCommand(normalized);
+    const persisted = await writeInstanceBotToken(env, instanceName, botToken);
+
+    logger.log(`Configured Telegram bot token for instance "${persisted.instanceName}".`);
+    return true;
   }
 
-  const { instanceName, botToken } = parseConfigureCommand(normalized);
-  const persisted = await writeInstanceBotToken(options.env ?? process.env, instanceName, botToken);
+  if (normalized[0] === "access") {
+    return runAccessCommand(normalized, env, logger);
+  }
 
-  logger.log(`Configured Telegram bot token for instance "${persisted.instanceName}".`);
-  return true;
+  if (normalized[0] === "status") {
+    return runStatusCommand(normalized, env, logger);
+  }
+
+  return false;
 }

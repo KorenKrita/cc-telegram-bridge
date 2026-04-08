@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { AccessStore } from "../src/state/access-store.js";
 import { runCli } from "../src/commands/cli.js";
 
 describe("runCli", () => {
@@ -72,7 +73,7 @@ describe("runCli", () => {
   });
 
   it("returns false for non-CLI invocation", async () => {
-    await expect(runCli(["status"], { env: { USERPROFILE: "C:\\Users\\hangw" } })).resolves.toBe(false);
+    await expect(runCli(["ping"], { env: { USERPROFILE: "C:\\Users\\hangw" } })).resolves.toBe(false);
   });
 
   it("updates an existing .env file instead of replacing unrelated lines", async () => {
@@ -88,6 +89,103 @@ describe("runCli", () => {
       });
 
       await expect(readFile(envPath, "utf8")).resolves.toBe("EXTRA=1\nKEEP=2\nTELEGRAM_BOT_TOKEN=\"new-token\"\n");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("redeems a pairing code for the default instance and rejects invalid codes", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      const accessPath = path.join(tempDir, ".codex", "channels", "telegram", "default", "access.json");
+      const store = new AccessStore(accessPath);
+      const issuedAt = new Date();
+      const issued = await store.issuePairingCode({
+        telegramUserId: 42,
+        telegramChatId: 84,
+        now: issuedAt,
+      });
+
+      const handled = await runCli(["telegram", "access", "pair", issued.code], {
+        env: { USERPROFILE: tempDir },
+        logger: {
+          log: (message) => messages.push(message),
+        },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages).toEqual(['Redeemed pairing code for instance "default" and chat 84.']);
+      expect((await store.getStatus()).pairedUsers).toBe(1);
+
+      await expect(
+        runCli(["telegram", "access", "pair", "ZZZZZZ"], {
+          env: { USERPROFILE: tempDir },
+        }),
+      ).rejects.toThrow('Pairing code "ZZZZZZ" is invalid or expired.');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("supports named-instance access policy, allow, revoke, and status commands", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      const accessPath = path.join(tempDir, ".codex", "channels", "telegram", "alpha", "access.json");
+      const store = new AccessStore(accessPath);
+      await store.issuePairingCode({
+        telegramUserId: 42,
+        telegramChatId: 84,
+        now: new Date("2026-04-08T00:00:00Z"),
+      });
+
+      await runCli(["telegram", "access", "policy", "--instance", "alpha", "allowlist"], {
+        env: { USERPROFILE: tempDir },
+        logger: {
+          log: (message) => messages.push(message),
+        },
+      });
+
+      await runCli(["telegram", "access", "allow", "--instance", "alpha", "123"], {
+        env: { USERPROFILE: tempDir },
+        logger: {
+          log: (message) => messages.push(message),
+        },
+      });
+
+      await runCli(["telegram", "access", "revoke", "--instance", "alpha", "123"], {
+        env: { USERPROFILE: tempDir },
+        logger: {
+          log: (message) => messages.push(message),
+        },
+      });
+
+      await runCli(["telegram", "access", "allow", "--instance", "alpha", "123"], {
+        env: { USERPROFILE: tempDir },
+        logger: {
+          log: (message) => messages.push(message),
+        },
+      });
+
+      await runCli(["telegram", "status", "--instance", "alpha"], {
+        env: { USERPROFILE: tempDir },
+        logger: {
+          log: (message) => messages.push(message),
+        },
+      });
+
+      expect(messages.slice(0, 4)).toEqual([
+        'Updated access policy for instance "alpha" to "allowlist".',
+        'Allowed chat 123 for instance "alpha".',
+        'Revoked chat 123 for instance "alpha".',
+        'Allowed chat 123 for instance "alpha".',
+      ]);
+      expect(messages[4]).toMatch(
+        /^Instance: alpha\nPolicy: allowlist\nPaired users: 0\nAllowlist: 123\nPending pairs: [A-Z2-9]{6} chat 84 expires 2026-04-08T00:05:00\.000Z$/,
+      );
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

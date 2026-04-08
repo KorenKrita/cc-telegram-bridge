@@ -1,4 +1,6 @@
 import { runCli } from "./commands/cli.js";
+import { acquireInstanceLock } from "./state/instance-lock.js";
+import { resolveConfig } from "./config.js";
 import {
   createServiceDependencies,
   parseServiceInstanceName,
@@ -29,8 +31,21 @@ async function main(): Promise<void> {
       process.env.TELEGRAM_BOT_TOKEN = resolvedEnv.TELEGRAM_BOT_TOKEN;
     }
 
+    const serviceConfig = resolveConfig(resolvedEnv);
+    const instanceLock = await acquireInstanceLock(serviceConfig.stateDir);
+    const releaseLockOnExit = () => {
+      instanceLock.releaseSync();
+    };
+
+    process.once("exit", releaseLockOnExit);
+
     const { api, bridge, config } = await createServiceDependencies(resolvedEnv);
-    await pollTelegramUpdates(api, bridge, config.inboxDir);
+    try {
+      await pollTelegramUpdates(api, bridge, config.inboxDir);
+    } finally {
+      process.removeListener("exit", releaseLockOnExit);
+      await instanceLock.release();
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);

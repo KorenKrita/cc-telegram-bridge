@@ -1,6 +1,12 @@
 import { AccessStore } from "../state/access-store.js";
 import { normalizeInstanceName } from "../instance.js";
 import { resolveInstanceAccessStatePath, type InstanceTokenEnv, writeInstanceBotToken } from "./access.js";
+import {
+  getServiceStatus,
+  startServiceInstance,
+  stopServiceInstance,
+  type ServiceCommandDeps,
+} from "./service.js";
 
 export interface CliLogger {
   log: (message: string) => void;
@@ -9,6 +15,7 @@ export interface CliLogger {
 export interface CliOptions {
   env?: InstanceTokenEnv;
   logger?: CliLogger;
+  serviceDeps?: ServiceCommandDeps;
 }
 
 function normalizeCommandArgs(argv: string[]): string[] {
@@ -167,6 +174,56 @@ async function runStatusCommand(argv: string[], env: InstanceTokenEnv, logger: C
   return true;
 }
 
+function formatServiceStatus(status: Awaited<ReturnType<typeof getServiceStatus>>): string {
+  return [
+    `Instance: ${status.instanceName}`,
+    `Running: ${status.running ? "yes" : "no"}`,
+    `Pid: ${status.pid ?? "none"}`,
+    `Policy: ${status.policy}`,
+    `Paired users: ${status.pairedUsers}`,
+    `Allowlist count: ${status.allowlistCount}`,
+    `Pending pairs: ${status.pendingPairs}`,
+    `State dir: ${status.stateDir}`,
+    `Stdout log: ${status.stdoutPath}`,
+    `Stderr log: ${status.stderrPath}`,
+  ].join("\n");
+}
+
+async function runServiceCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+  serviceDeps: ServiceCommandDeps,
+): Promise<boolean> {
+  if (argv.length < 2) {
+    throw new Error("Usage: telegram service <start|stop|status> ...");
+  }
+
+  const subcommand = argv[1];
+  const { instanceName, args } = extractInstanceOption(argv.slice(2));
+
+  if (args.length !== 0) {
+    throw new Error("Usage: telegram service <start|stop|status> [--instance <name>]");
+  }
+
+  if (subcommand === "start") {
+    logger.log(await startServiceInstance(env, instanceName, serviceDeps));
+    return true;
+  }
+
+  if (subcommand === "stop") {
+    logger.log(await stopServiceInstance(env, instanceName, serviceDeps));
+    return true;
+  }
+
+  if (subcommand === "status") {
+    logger.log(formatServiceStatus(await getServiceStatus(env, instanceName, serviceDeps)));
+    return true;
+  }
+
+  throw new Error("Usage: telegram service <start|stop|status> ...");
+}
+
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<boolean> {
   const normalized = normalizeCommandArgs(argv);
   const logger = options.logger ?? console;
@@ -186,6 +243,10 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   if (normalized[0] === "status") {
     return runStatusCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "service") {
+    return runServiceCommand(normalized, env, logger, options.serviceDeps ?? {});
   }
 
   return false;

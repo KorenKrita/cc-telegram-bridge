@@ -107,6 +107,26 @@ describe("AccessStore", () => {
     }
   });
 
+  it("removes pending pairing codes when revoking a chat", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    try {
+      mockRandomInt.mockReturnValue(0);
+      const store = new AccessStore(path.join(dir, "access.json"));
+      const issued = await store.issuePairingCode({
+        telegramUserId: 42,
+        telegramChatId: 84,
+        now: new Date("2026-04-08T00:00:00Z"),
+      });
+
+      await store.revokeChat(84);
+
+      await expect(store.redeemPairingCode(issued.code, new Date("2026-04-08T00:01:00Z"))).resolves.toBeNull();
+      expect((await store.load()).pendingPairs).toHaveLength(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("removes expired pairing codes when redeeming them", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     try {

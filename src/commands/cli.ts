@@ -154,7 +154,12 @@ async function runAccessCommand(
 }
 
 async function runStatusCommand(argv: string[], env: InstanceTokenEnv, logger: CliLogger): Promise<boolean> {
-  const { instanceName } = extractInstanceOption(argv.slice(1));
+  const { instanceName, args } = extractInstanceOption(argv.slice(1));
+
+  if (args.length !== 0) {
+    throw new Error("Usage: telegram status [--instance <name>]");
+  }
+
   const store = new AccessStore(resolveInstanceAccessStatePath(env, instanceName));
   const status = await store.getStatus();
 

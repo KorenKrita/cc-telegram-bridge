@@ -76,6 +76,14 @@ describe("runCli", () => {
     await expect(runCli(["ping"], { env: { USERPROFILE: "C:\\Users\\hangw" } })).resolves.toBe(false);
   });
 
+  it("rejects unexpected positional args for status", async () => {
+    await expect(
+      runCli(["telegram", "status", "extra"], {
+        env: { USERPROFILE: "C:\\Users\\hangw" },
+      }),
+    ).rejects.toThrow("Usage: telegram status [--instance <name>]");
+  });
+
   it("updates an existing .env file instead of replacing unrelated lines", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
 

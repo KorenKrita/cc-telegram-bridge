@@ -1,7 +1,12 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { Bridge, type AccessStoreLike, type SessionManagerLike } from "../src/runtime/bridge.js";
 import type { CodexAdapter } from "../src/codex/adapter.js";
+import { AccessStore } from "../src/state/access-store.js";
 
 describe("Bridge", () => {
   it("routes an authorized message through the current session", async () => {
@@ -147,5 +152,42 @@ describe("Bridge", () => {
     expect(accessStore.issuePairingCode).not.toHaveBeenCalled();
     expect(sessionManager.getOrCreateSession).toHaveBeenCalledWith(84);
     expect(adapter.sendUserMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires a revoked chat to pair again under pairing policy", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+
+    try {
+      const accessStore = new AccessStore(path.join(dir, "access.json"));
+      const issued = await accessStore.issuePairingCode({
+        telegramUserId: 42,
+        telegramChatId: 84,
+        now: new Date("2026-04-08T00:00:00Z"),
+      });
+      await accessStore.redeemPairingCode(issued.code, new Date("2026-04-08T00:01:00Z"));
+      await accessStore.revokeChat(84);
+
+      const sessionManager: SessionManagerLike = {
+        getOrCreateSession: vi.fn(),
+      };
+      const adapter: CodexAdapter = {
+        sendUserMessage: vi.fn(),
+        createSession: vi.fn(),
+      };
+
+      const bridge = new Bridge(accessStore, sessionManager, adapter);
+      const result = await bridge.handleAuthorizedMessage({
+        chatId: 84,
+        userId: 42,
+        text: "hello again",
+        files: [],
+      });
+
+      expect(result.text).toMatch(/^Pair this chat with code [A-Z2-9]{6}$/);
+      expect(sessionManager.getOrCreateSession).not.toHaveBeenCalled();
+      expect(adapter.sendUserMessage).not.toHaveBeenCalled();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

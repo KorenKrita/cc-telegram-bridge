@@ -114,6 +114,8 @@ export class AccessStore {
   async revokeChat(chatId: number): Promise<void> {
     const state = await this.load();
     state.allowlist = state.allowlist.filter((entry) => entry !== chatId);
+    state.pairedUsers = state.pairedUsers.filter((entry) => entry.telegramChatId !== chatId);
+    state.pendingPairs = state.pendingPairs.filter((entry) => entry.telegramChatId !== chatId);
     await this.store.write(state);
   }
 

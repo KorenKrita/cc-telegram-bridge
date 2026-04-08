@@ -234,8 +234,8 @@ Telegram Update → Normalize → Access Check → Chat Queue (serialized)
       <p>One command to auto-approve everything — works with both engines. Per-instance, hot-reloadable.</p>
     </td>
     <td>
-      <h3>Instance Isolation</h3>
-      <p>Every instance: own engine, token, access, sessions, threads, inbox, audit trail. No shared state.</p>
+      <h3>Full Isolation</h3>
+      <p>Every instance: own engine, token, access, sessions, threads, inbox, audit trail, <strong>and engine memory</strong>. One bot's learned context never leaks to another.</p>
     </td>
   </tr>
   <tr>
@@ -311,6 +311,10 @@ npm run dev -- telegram status [--instance work]
 <instance>/
 ├── agent.md                # Bot personality & instructions
 ├── config.json             # Engine (codex|claude), YOLO mode
+├── engine-home/            # Isolated engine config, memory, sessions
+│   ├── memory/             # Claude: auto-memory (CLAUDE_CONFIG_DIR)
+│   ├── sessions/           # Codex: thread history (CODEX_HOME)
+│   └── ...                 # Each bot's engine state is fully isolated
 ├── workspace/              # Claude working directory (Claude engine only)
 │   └── CLAUDE.md           # Claude Code project instructions
 ├── .env                    # Bot token
@@ -321,7 +325,7 @@ npm run dev -- telegram status [--instance work]
 ├── audit.log.jsonl         # Structured audit stream
 ├── service.stdout.log      # Service stdout
 ├── service.stderr.log      # Service stderr
-└── inbox\                  # Downloaded attachments
+└── inbox/                  # Downloaded attachments
 ```
 
 ---

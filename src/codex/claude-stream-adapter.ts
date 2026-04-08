@@ -115,11 +115,15 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       instructionsPath?: string;
       configPath?: string;
       workspacePath?: string;
+      engineHomePath?: string;
     },
   ) {
     this.childEnv = options?.childEnv ?? (() => {
       const env = { ...process.env };
       delete env.TELEGRAM_BOT_TOKEN;
+      if (options?.engineHomePath) {
+        env.CLAUDE_CONFIG_DIR = options.engineHomePath;
+      }
       return env;
     })();
 

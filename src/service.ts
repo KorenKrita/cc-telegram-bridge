@@ -245,11 +245,14 @@ async function createAdapter(
   const approvalMode = await readApprovalMode(configPath);
 
   if (engine === "claude") {
+    const engineHomePath = path.join(config.stateDir, "engine-home");
     await mkdir(workspacePath, { recursive: true });
+    await mkdir(engineHomePath, { recursive: true });
     return new ClaudeStreamAdapter(resolveClaudeExecutable(env), {
       instructionsPath,
       configPath,
       workspacePath,
+      engineHomePath,
     });
   }
 
@@ -257,7 +260,9 @@ async function createAdapter(
     return new CodexAppServerAdapter(config.codexExecutable, process.cwd());
   }
 
-  return new ProcessCodexAdapter(config.codexExecutable, undefined, undefined, instructionsPath, configPath);
+  const engineHomePath = path.join(config.stateDir, "engine-home");
+  await mkdir(engineHomePath, { recursive: true });
+  return new ProcessCodexAdapter(config.codexExecutable, undefined, undefined, instructionsPath, configPath, engineHomePath);
 }
 
 export async function createServiceDependencies(env: EnvSource): Promise<{ config: ReturnType<typeof resolveConfig>; api: TelegramApi; bridge: Bridge }> {

@@ -147,17 +147,24 @@ export class ProcessCodexAdapter implements CodexAdapter {
     spawnCodexArg?: SpawnCodex,
     instructionsPath?: string,
     configPath?: string,
+    engineHomePath?: string,
   ) {
     this.childEnv =
       typeof childEnvOrSpawn === "function"
         ? (() => {
             const env = { ...process.env };
             delete env.TELEGRAM_BOT_TOKEN;
+            if (engineHomePath) {
+              env.CODEX_HOME = engineHomePath;
+            }
             return env;
           })()
         : childEnvOrSpawn ?? (() => {
             const env = { ...process.env };
             delete env.TELEGRAM_BOT_TOKEN;
+            if (engineHomePath) {
+              env.CODEX_HOME = engineHomePath;
+            }
             return env;
           })();
 

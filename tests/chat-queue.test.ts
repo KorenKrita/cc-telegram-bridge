@@ -21,4 +21,32 @@ describe("ChatQueue", () => {
 
     expect(events).toEqual(["start-1", "end-1", "start-2", "end-2"]);
   });
+
+  it("cleans up settled entries and keeps running after rejection", async () => {
+    const queue = new ChatQueue();
+    const events: string[] = [];
+
+    await queue
+      .enqueue(1, async () => {
+        events.push("reject-start");
+        throw new Error("boom");
+      })
+      .then(
+        () => {
+          throw new Error("expected rejection");
+        },
+        (error: unknown) => {
+          expect(error).toBeInstanceOf(Error);
+          expect((error as Error).message).toBe("boom");
+        },
+      );
+
+    expect((queue as unknown as { queues: Map<number, unknown> }).queues.size).toBe(0);
+
+    await queue.enqueue(1, async () => {
+      events.push("recover-start");
+    });
+
+    expect(events).toEqual(["reject-start", "recover-start"]);
+  });
 });

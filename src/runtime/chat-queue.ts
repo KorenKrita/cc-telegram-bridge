@@ -5,7 +5,15 @@ export class ChatQueue {
     const previous = this.queues.get(chatId) ?? Promise.resolve();
     const run = previous.catch(() => undefined).then(job);
 
-    this.queues.set(chatId, run.then(() => undefined, () => undefined));
+    this.queues.set(chatId, run);
+    void run
+      .finally(() => {
+        if (this.queues.get(chatId) === run) {
+          this.queues.delete(chatId);
+        }
+      })
+      .catch(() => undefined);
+
     return run;
   }
 }

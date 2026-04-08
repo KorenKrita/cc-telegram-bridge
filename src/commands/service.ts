@@ -74,12 +74,16 @@ function defaultIsProcessAlive(pid: number): boolean {
 }
 
 function defaultIsExpectedServiceProcess(pid: number, entryPath: string, instanceName: string): boolean {
+  const relativeEntryPath = path.win32.relative(process.cwd(), entryPath).replace(/\\/g, "/");
   const encoded = Buffer.from(
     `
       $proc = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}";
       if ($null -eq $proc) { exit 1 }
       $cmd = $proc.CommandLine;
-      if ($cmd -like "*${entryPath.replace(/\\/g, "\\\\")}*" -and $cmd -like "*--instance ${instanceName}*") { exit 0 }
+      if (
+        ($cmd -like "*${entryPath.replace(/\\/g, "\\\\")}*" -or $cmd -like "*${relativeEntryPath}*" -or $cmd -like "*dist/src/index.js*") -and
+        $cmd -like "*--instance ${instanceName}*"
+      ) { exit 0 }
       exit 1
     `,
     "utf16le",

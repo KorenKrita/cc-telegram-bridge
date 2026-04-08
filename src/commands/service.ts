@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, rmSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -166,6 +166,29 @@ async function readLockRecord(lockPath: string): Promise<InstanceLockRecord | nu
   return null;
 }
 
+function removeLockIfMatches(lockPath: string, expectedPid: number | null): void {
+  if (expectedPid === null) {
+    return;
+  }
+
+  try {
+    const raw = readFileSync(lockPath, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "pid" in parsed &&
+      typeof (parsed as InstanceLockRecord).pid === "number" &&
+      (parsed as InstanceLockRecord).pid === expectedPid
+    ) {
+      rmSync(lockPath, { force: true });
+    }
+  } catch {
+    return;
+  }
+}
+
 async function readLastNonEmptyLine(filePath: string): Promise<string | undefined> {
   try {
     const raw = await readFile(filePath, "utf8");
@@ -280,6 +303,7 @@ export async function stopServiceInstance(
     !isProcessAlive(existingLock.pid) ||
     !isExpectedServiceProcess(existingLock.pid, paths.entryPath, paths.instanceName)
   ) {
+    removeLockIfMatches(paths.lockPath, existingLock?.pid ?? null);
     return `Instance "${paths.instanceName}" is not running.`;
   }
 
@@ -311,6 +335,9 @@ export async function getServiceStatus(
     pid !== null &&
     isProcessAlive(pid) &&
     isExpectedServiceProcess(pid, paths.entryPath, paths.instanceName);
+  if (!running) {
+    removeLockIfMatches(paths.lockPath, pid);
+  }
   const accessStore = new AccessStore(path.join(paths.stateDir, "access.json"));
   const accessStatus = await accessStore.getStatus();
   const lastHandledUpdateId = await getLastHandledUpdateId(path.join(paths.stateDir, "inbox"));

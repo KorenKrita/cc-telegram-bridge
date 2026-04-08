@@ -142,7 +142,13 @@ describe("CodexAppServerAdapter", () => {
     child.stdout.emitData('{"id":1,"result":{"platformOs":"windows"}}\n');
 
     await waitFor(() => child.stdin.lines.length >= 2);
-    const turnStart = JSON.parse(child.stdin.lines[1] ?? "{}");
+    const resume = JSON.parse(child.stdin.lines[1] ?? "{}");
+    expect(resume.method).toBe("thread/resume");
+    expect(resume.params.threadId).toBe("thread-abc");
+    child.stdout.emitData('{"id":2,"result":{"thread":{"id":"thread-abc"}}}\n');
+
+    await waitFor(() => child.stdin.lines.length >= 3);
+    const turnStart = JSON.parse(child.stdin.lines[2] ?? "{}");
     expect(turnStart.method).toBe("turn/start");
     expect(turnStart.params.threadId).toBe("thread-abc");
     expect(turnStart.params.input[0].text).toBe("[System Instructions]\nBe concise.\n[End Instructions]\nNext");
@@ -152,6 +158,40 @@ describe("CodexAppServerAdapter", () => {
 
     await expect(promise).resolves.toEqual({
       text: "done",
+    });
+  });
+
+  it("does not resume a thread twice once it is loaded", async () => {
+    const { child, spawnFn } = createSpawnHarness();
+    const adapter = new CodexAppServerAdapter("codex", process.cwd(), spawnFn);
+
+    const first = adapter.sendUserMessage("thread-abc", {
+      text: "First",
+      files: [],
+    });
+
+    await waitFor(() => child.stdin.lines.length >= 1);
+    child.stdout.emitData('{"id":1,"result":{"platformOs":"windows"}}\n');
+    await waitFor(() => child.stdin.lines.length >= 2);
+    child.stdout.emitData('{"id":2,"result":{"thread":{"id":"thread-abc"}}}\n');
+    await waitFor(() => child.stdin.lines.length >= 3);
+    child.stdout.emitData('{"method":"item/completed","params":{"threadId":"thread-abc","item":{"type":"agentMessage","text":"done-1"}}}\n');
+    child.stdout.emitData('{"method":"turn/completed","params":{"threadId":"thread-abc","turn":{"id":"turn-1","items":[],"status":"completed","error":null}}}\n');
+    await first;
+
+    const second = adapter.sendUserMessage("thread-abc", {
+      text: "Second",
+      files: [],
+    });
+
+    await waitFor(() => child.stdin.lines.length >= 4);
+    const nextRequest = JSON.parse(child.stdin.lines[3] ?? "{}");
+    expect(nextRequest.method).toBe("turn/start");
+    child.stdout.emitData('{"method":"item/completed","params":{"threadId":"thread-abc","item":{"type":"agentMessage","text":"done-2"}}}\n');
+    child.stdout.emitData('{"method":"turn/completed","params":{"threadId":"thread-abc","turn":{"id":"turn-2","items":[],"status":"completed","error":null}}}\n');
+
+    await expect(second).resolves.toEqual({
+      text: "done-2",
     });
   });
 });

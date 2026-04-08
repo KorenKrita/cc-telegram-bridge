@@ -100,6 +100,7 @@ export class CodexAppServerAdapter implements CodexAdapter {
   private nextRequestId = 1;
   private readonly pendingRequests = new Map<number, PendingRequest>();
   private readonly pendingTurns = new Map<string, PendingTurn>();
+  private readonly loadedThreads = new Set<string>();
 
   constructor(
     private readonly codexExecutable: string,
@@ -134,7 +135,7 @@ export class CodexAppServerAdapter implements CodexAdapter {
     await this.ensureInitialized();
 
     const prompt = this.buildPrompt(input);
-    const threadId = isLogicalTelegramSessionId(sessionId) ? await this.startThread() : sessionId;
+    const threadId = isLogicalTelegramSessionId(sessionId) ? await this.startThread() : await this.ensureThreadLoaded(sessionId);
     const text = await this.startTurn(threadId, prompt);
 
     return {
@@ -319,7 +320,26 @@ export class CodexAppServerAdapter implements CodexAdapter {
       throw new Error("codex app-server did not return a thread id");
     }
 
+    this.loadedThreads.add(threadId);
     return threadId;
+  }
+
+  private async ensureThreadLoaded(threadId: string): Promise<string> {
+    if (this.loadedThreads.has(threadId)) {
+      return threadId;
+    }
+
+    const result = (await this.request("thread/resume", {
+      threadId,
+    })) as { thread?: { id?: string } };
+    const resumedThreadId = result.thread?.id;
+
+    if (!resumedThreadId) {
+      throw new Error(`codex app-server could not resume thread ${threadId}`);
+    }
+
+    this.loadedThreads.add(resumedThreadId);
+    return resumedThreadId;
   }
 
   private async startTurn(threadId: string, prompt: string): Promise<string> {
@@ -353,5 +373,6 @@ export class CodexAppServerAdapter implements CodexAdapter {
       pending.reject(error);
     }
     this.pendingTurns.clear();
+    this.loadedThreads.clear();
   }
 }

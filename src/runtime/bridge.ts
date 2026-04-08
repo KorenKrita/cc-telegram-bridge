@@ -5,7 +5,16 @@ export interface AccessStoreLike {
     policy: "pairing" | "allowlist";
     allowlist: number[];
     pendingPairs: unknown[];
-    pairedUsers: unknown[];
+    pairedUsers: Array<{
+      telegramChatId: number;
+    }>;
+  }>;
+  issuePairingCode(input: {
+    telegramUserId: number;
+    telegramChatId: number;
+    now: Date;
+  }): Promise<{
+    code: string;
   }>;
 }
 
@@ -30,6 +39,21 @@ export class Bridge {
 
     if (accessState.policy === "allowlist" && !accessState.allowlist.includes(input.chatId)) {
       throw new Error("User is not in the allowlist");
+    }
+
+    if (
+      accessState.policy === "pairing" &&
+      !accessState.pairedUsers.some((user) => user.telegramChatId === input.chatId)
+    ) {
+      const pendingPair = await this.accessStore.issuePairingCode({
+        telegramUserId: input.userId,
+        telegramChatId: input.chatId,
+        now: new Date(),
+      });
+
+      return {
+        text: `Pair this chat with code ${pendingPair.code}`,
+      };
     }
 
     const session = await this.sessionManager.getOrCreateSession(input.chatId);

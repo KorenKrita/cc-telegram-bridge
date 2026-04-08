@@ -12,6 +12,7 @@ describe("Bridge", () => {
         allowlist: [84],
         pendingPairs: [],
       }),
+      issuePairingCode: vi.fn(),
     };
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
@@ -46,6 +47,7 @@ describe("Bridge", () => {
         allowlist: [99],
         pendingPairs: [],
       }),
+      issuePairingCode: vi.fn(),
     };
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn(),
@@ -67,5 +69,83 @@ describe("Bridge", () => {
     ).rejects.toThrow("User is not in the allowlist");
     expect(sessionManager.getOrCreateSession).not.toHaveBeenCalled();
     expect(adapter.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("blocks an unknown chat in pairing mode and returns a pairing code", async () => {
+    const accessStore: AccessStoreLike = {
+      load: vi.fn().mockResolvedValue({
+        policy: "pairing",
+        pairedUsers: [],
+        allowlist: [99],
+        pendingPairs: [],
+      }),
+      issuePairingCode: vi.fn().mockResolvedValue({
+        code: "ABC123",
+      }),
+    };
+    const sessionManager: SessionManagerLike = {
+      getOrCreateSession: vi.fn(),
+    };
+    const adapter: CodexAdapter = {
+      sendUserMessage: vi.fn(),
+      createSession: vi.fn(),
+    };
+
+    const bridge = new Bridge(accessStore, sessionManager, adapter);
+    const result = await bridge.handleAuthorizedMessage({
+      chatId: 84,
+      userId: 42,
+      text: "hello",
+      files: [],
+    });
+
+    expect(result).toEqual({
+      text: "Pair this chat with code ABC123",
+    });
+    expect(accessStore.issuePairingCode).toHaveBeenCalledWith({
+      telegramUserId: 42,
+      telegramChatId: 84,
+      now: expect.any(Date),
+    });
+    expect(sessionManager.getOrCreateSession).not.toHaveBeenCalled();
+    expect(adapter.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("allows a paired chat in pairing mode", async () => {
+    const accessStore: AccessStoreLike = {
+      load: vi.fn().mockResolvedValue({
+        policy: "pairing",
+        pairedUsers: [
+          {
+            telegramUserId: 42,
+            telegramChatId: 84,
+            pairedAt: "2026-04-08T00:00:00.000Z",
+          },
+        ],
+        allowlist: [],
+        pendingPairs: [],
+      }),
+      issuePairingCode: vi.fn(),
+    };
+    const sessionManager: SessionManagerLike = {
+      getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
+    };
+    const adapter: CodexAdapter = {
+      sendUserMessage: vi.fn().mockResolvedValue({ text: "done" }),
+      createSession: vi.fn(),
+    };
+
+    const bridge = new Bridge(accessStore, sessionManager, adapter);
+    const result = await bridge.handleAuthorizedMessage({
+      chatId: 84,
+      userId: 42,
+      text: "hello",
+      files: [],
+    });
+
+    expect(result).toEqual({ text: "done" });
+    expect(accessStore.issuePairingCode).not.toHaveBeenCalled();
+    expect(sessionManager.getOrCreateSession).toHaveBeenCalledWith(84);
+    expect(adapter.sendUserMessage).toHaveBeenCalledTimes(1);
   });
 });

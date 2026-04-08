@@ -11,8 +11,20 @@ import {
   processTelegramUpdates,
   readInstanceBotTokenFromEnvFile,
 } from "../src/service.js";
+import { ChatQueue } from "../src/runtime/chat-queue.js";
 import { handleNormalizedTelegramMessage } from "../src/telegram/delivery.js";
 import { renderErrorMessage, renderWorkingMessage } from "../src/telegram/message-renderer.js";
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+
+  return { promise, resolve, reject };
+}
 
 describe("parseServiceInstanceName", () => {
   it("defaults to the default instance", () => {
@@ -83,7 +95,46 @@ describe("createServiceDependenciesForInstance", () => {
 });
 
 describe("polling helpers", () => {
-  it("continues processing later updates when one handler throws", async () => {
+  it("does not advance offset beyond a failed update", async () => {
+    const logger = {
+      error: vi.fn(),
+    };
+    const api = {
+      getUpdates: vi.fn().mockResolvedValue([
+        {
+          update_id: 10,
+          message: {
+            chat: { id: 123 },
+            from: { id: 456 },
+            text: "first",
+          },
+        },
+        {
+          update_id: 11,
+          message: {
+            chat: { id: 123 },
+            from: { id: 456 },
+            text: "second",
+          },
+        },
+      ]),
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
+    };
+    const bridge = {
+      handleAuthorizedMessage: vi
+        .fn()
+        .mockResolvedValueOnce({ text: "first result" })
+        .mockRejectedValueOnce(new Error("boom")),
+    };
+
+    await expect(pollTelegramUpdatesOnce(api as never, bridge as never, path.join(os.tmpdir(), "ignored"), logger, 7)).resolves.toBe(11);
+
+    expect(bridge.handleAuthorizedMessage).toHaveBeenCalledTimes(2);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops processing later updates after a hard failure", async () => {
     const logger = {
       error: vi.fn(),
     };
@@ -122,7 +173,7 @@ describe("polling helpers", () => {
       logger,
     );
 
-    expect(bridge.handleAuthorizedMessage).toHaveBeenCalledTimes(2);
+    expect(bridge.handleAuthorizedMessage).toHaveBeenCalledTimes(1);
     expect(logger.error).toHaveBeenCalledTimes(1);
   });
 
@@ -140,6 +191,79 @@ describe("polling helpers", () => {
     await expect(pollTelegramUpdatesOnce(api as never, bridge as never, path.join(os.tmpdir(), "ignored"), logger, 7)).resolves.toBe(7);
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalled();
+  });
+
+  it("serializes same-chat updates through the service chat queue", async () => {
+    const logger = {
+      error: vi.fn(),
+    };
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+    };
+    let activeCalls = 0;
+    let maxConcurrentCalls = 0;
+    const releaseFirstCall = createDeferred<void>();
+    const bridge = {
+      handleAuthorizedMessage: vi.fn().mockImplementation(async ({ text }: { text: string }) => {
+        activeCalls += 1;
+        maxConcurrentCalls = Math.max(maxConcurrentCalls, activeCalls);
+
+        if (text === "first") {
+          await releaseFirstCall.promise;
+        }
+
+        activeCalls -= 1;
+        return { text: `${text} done` };
+      }),
+    };
+    const chatQueue = new ChatQueue();
+    const firstRun = processTelegramUpdates(
+      [
+        {
+          message: {
+            chat: { id: 123 },
+            from: { id: 456 },
+            text: "first",
+          },
+        },
+      ],
+      {
+        api: api as never,
+        bridge: bridge as never,
+        inboxDir: path.join(os.tmpdir(), "ignored"),
+        chatQueue,
+      },
+      logger,
+    );
+    const secondRun = processTelegramUpdates(
+      [
+        {
+          message: {
+            chat: { id: 123 },
+            from: { id: 456 },
+            text: "second",
+          },
+        },
+      ],
+      {
+        api: api as never,
+        bridge: bridge as never,
+        inboxDir: path.join(os.tmpdir(), "ignored"),
+        chatQueue,
+      },
+      logger,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(maxConcurrentCalls).toBe(1);
+
+    releaseFirstCall.resolve();
+    await Promise.all([firstRun, secondRun]);
+
+    expect(bridge.handleAuthorizedMessage).toHaveBeenCalledTimes(2);
+    expect(maxConcurrentCalls).toBe(1);
+    expect(logger.error).not.toHaveBeenCalled();
   });
 
   it("downloads attachments and passes local file paths to the bridge", async () => {

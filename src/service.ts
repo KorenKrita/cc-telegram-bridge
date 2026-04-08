@@ -11,13 +11,16 @@ import { handleNormalizedTelegramMessage, type TelegramDeliveryContext } from ".
 import { normalizeUpdate } from "./telegram/update-normalizer.js";
 import { SessionManager } from "./runtime/session-manager.js";
 import { normalizeInstanceName } from "./instance.js";
+import { ChatQueue } from "./runtime/chat-queue.js";
 
 export interface ServiceDependencies {
   api: TelegramApi;
   bridge: Bridge;
 }
 
-export interface TelegramServiceContext extends TelegramDeliveryContext {}
+export interface TelegramServiceContext extends TelegramDeliveryContext {
+  chatQueue?: ChatQueue;
+}
 
 export interface ResolvedInstanceEnv extends EnvSource {
   USERPROFILE?: string;
@@ -144,17 +147,14 @@ export async function createServiceDependenciesForInstance(
   return createServiceDependencies(await resolveServiceEnvForInstance(env, instanceName));
 }
 
-function getLastUpdateOffset(updates: unknown[], fallbackOffset?: number): number | undefined {
-  if (updates.length === 0) {
+const defaultChatQueue = new ChatQueue();
+
+function getNextUpdateOffset(update: unknown, fallbackOffset?: number): number | undefined {
+  if (typeof update !== "object" || update === null || !("update_id" in update)) {
     return fallbackOffset;
   }
 
-  const lastUpdate = updates[updates.length - 1];
-  if (typeof lastUpdate !== "object" || lastUpdate === null || !("update_id" in lastUpdate)) {
-    return fallbackOffset;
-  }
-
-  const updateId = (lastUpdate as { update_id?: unknown }).update_id;
+  const updateId = (update as { update_id?: unknown }).update_id;
   if (typeof updateId !== "number") {
     return fallbackOffset;
   }
@@ -171,23 +171,34 @@ export async function processTelegramUpdates(
   updates: unknown[],
   context: TelegramServiceContext,
   logger: Pick<Console, "error"> = console,
-): Promise<void> {
+): Promise<number | undefined> {
+  let nextOffset: number | undefined;
+  const chatQueue = context.chatQueue ?? defaultChatQueue;
+
   for (const update of updates) {
+    const completedOffset = getNextUpdateOffset(update, nextOffset);
+
     try {
       const normalized = normalizeUpdate(update);
       if (!normalized) {
+        nextOffset = completedOffset;
         continue;
       }
 
       if (!normalized.text && normalized.attachments.length === 0) {
+        nextOffset = completedOffset;
         continue;
       }
 
-      await handleNormalizedTelegramMessage(normalized, context);
+      await chatQueue.enqueue(normalized.chatId, () => handleNormalizedTelegramMessage(normalized, context));
+      nextOffset = completedOffset;
     } catch (error) {
       logger.error(formatErrorMessage("Failed to handle Telegram update", error));
+      break;
     }
   }
+
+  return nextOffset;
 }
 
 export async function pollTelegramUpdatesOnce(
@@ -199,8 +210,7 @@ export async function pollTelegramUpdatesOnce(
 ): Promise<number | undefined> {
   try {
     const updates = await api.getUpdates(offset);
-    await processTelegramUpdates(updates, { api, bridge, inboxDir }, logger);
-    return getLastUpdateOffset(updates, offset);
+    return processTelegramUpdates(updates, { api, bridge, inboxDir }, logger);
   } catch (error) {
     logger.error(formatErrorMessage("Failed to fetch Telegram updates", error));
     return offset;

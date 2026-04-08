@@ -109,8 +109,24 @@ export class AccessStore {
     now: Date;
   }): Promise<PendingPair> {
     const state = await this.load();
+    const nowTime = now.getTime();
+    const reusablePendingPair = state.pendingPairs.find(
+      (pair) =>
+        pair.telegramUserId === telegramUserId &&
+        pair.telegramChatId === telegramChatId &&
+        new Date(pair.expiresAt).getTime() > nowTime,
+    );
 
-    state.pendingPairs = state.pendingPairs.filter((pair) => pair.telegramUserId !== telegramUserId);
+    state.pendingPairs = state.pendingPairs.filter(
+      (pair) => new Date(pair.expiresAt).getTime() > nowTime && pair.telegramUserId !== telegramUserId,
+    );
+
+    if (reusablePendingPair) {
+      state.pendingPairs.push(reusablePendingPair);
+      await this.store.write(state);
+      return reusablePendingPair;
+    }
+
     const pendingCodes = new Set(state.pendingPairs.map((pair) => pair.code));
 
     let code = generateCode();

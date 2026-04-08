@@ -103,7 +103,7 @@ describe("AccessStore", () => {
     }
   });
 
-  it("replaces the pending pairing code for the same user", async () => {
+  it("reuses the active pending pairing code for the same user and chat", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     try {
       setRandomIntSequence([0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]);
@@ -123,9 +123,9 @@ describe("AccessStore", () => {
       const state = await store.load();
 
       expect(firstIssued.code).toBe("AAAAAA");
-      expect(secondIssued.code).toBe("BBBBBB");
+      expect(secondIssued.code).toBe("AAAAAA");
       expect(state.pendingPairs).toHaveLength(1);
-      expect(state.pendingPairs[0]?.code).toBe("BBBBBB");
+      expect(state.pendingPairs[0]?.code).toBe("AAAAAA");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

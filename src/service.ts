@@ -121,6 +121,10 @@ export async function createServiceDependenciesForInstance(
     throw new Error("TELEGRAM_BOT_TOKEN is required");
   }
 
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
+    process.env.TELEGRAM_BOT_TOKEN = telegramBotToken;
+  }
+
   return createServiceDependencies({
     ...baseEnv,
     TELEGRAM_BOT_TOKEN: telegramBotToken,

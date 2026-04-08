@@ -109,10 +109,13 @@ function buildCommandInvocation(command: string, args: string[]): { command: str
   return { command, args, shell: false };
 }
 
+export type ApprovalMode = "normal" | "full-auto" | "bypass";
+
 export class ProcessCodexAdapter implements CodexAdapter {
   private readonly childEnv: NodeJS.ProcessEnv;
   private readonly spawnCodex: SpawnCodex;
   private readonly instructionsPath: string | undefined;
+  private readonly configPath: string | undefined;
 
   /**
    * First-pass adapter that runs Codex as a process.
@@ -122,12 +125,16 @@ export class ProcessCodexAdapter implements CodexAdapter {
    * If instructionsPath is provided, the file contents are prepended to every
    * prompt sent to Codex (loaded fresh on each call so edits take effect
    * without restarting the service).
+   *
+   * If configPath is provided, config.json is loaded on each call to pick up
+   * approvalMode ("normal" | "full-auto" | "bypass") for YOLO mode.
    */
   constructor(
     private readonly codexExecutable: string,
     childEnvOrSpawn?: NodeJS.ProcessEnv | SpawnCodex,
     spawnCodexArg?: SpawnCodex,
     instructionsPath?: string,
+    configPath?: string,
   ) {
     this.childEnv =
       typeof childEnvOrSpawn === "function"
@@ -148,10 +155,29 @@ export class ProcessCodexAdapter implements CodexAdapter {
         : spawnCodexArg ?? (spawn as unknown as SpawnCodex);
 
     this.instructionsPath = instructionsPath;
+    this.configPath = configPath;
   }
 
   async createSession(chatId: number): Promise<CodexSessionHandle> {
     return { sessionId: `telegram-${chatId}` };
+  }
+
+  private async loadApprovalMode(): Promise<ApprovalMode> {
+    if (!this.configPath) {
+      return "normal";
+    }
+
+    try {
+      const raw = await readFile(this.configPath, "utf8");
+      const parsed = JSON.parse(raw) as { approvalMode?: string };
+      const mode = parsed.approvalMode;
+      if (mode === "full-auto" || mode === "bypass") {
+        return mode;
+      }
+      return "normal";
+    } catch {
+      return "normal";
+    }
   }
 
   private async loadInstructions(): Promise<string | null> {
@@ -189,9 +215,16 @@ export class ProcessCodexAdapter implements CodexAdapter {
     parts.push(input.text);
     parts.push(...input.files.map((file) => `Attachment: ${file}`));
     const prompt = parts.join("\n");
+    const approvalMode = this.configPath ? await this.loadApprovalMode() : "normal";
+    const approvalFlags: string[] =
+      approvalMode === "bypass"
+        ? ["--dangerously-bypass-approvals-and-sandbox"]
+        : approvalMode === "full-auto"
+          ? ["--full-auto"]
+          : [];
     const args = isLogicalTelegramSessionId(sessionId)
-      ? ["exec", "--json", prompt]
-      : ["exec", "resume", "--json", sessionId, prompt];
+      ? ["exec", "--json", ...approvalFlags, prompt]
+      : ["exec", "resume", "--json", ...approvalFlags, sessionId, prompt];
     const result = await this.runCodexJsonCommand(args);
     const events = parseJsonEvents(result.stdout);
     const lastAgentMessage = extractLastAgentMessage(events);

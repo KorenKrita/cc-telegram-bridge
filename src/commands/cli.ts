@@ -534,6 +534,97 @@ async function runInstructionsCommand(
   throw new Error("Usage: telegram instructions <show|set|path> [--instance <name>] [file-path]");
 }
 
+function resolveConfigJsonPath(
+  env: Pick<EnvSource, "USERPROFILE" | "CODEX_TELEGRAM_STATE_DIR">,
+  instanceName: string,
+): string {
+  const stateDir = resolveInstanceStateDir({
+    USERPROFILE: env.USERPROFILE,
+    CODEX_TELEGRAM_STATE_DIR: env.CODEX_TELEGRAM_STATE_DIR,
+    CODEX_TELEGRAM_INSTANCE: instanceName,
+  });
+  return path.join(stateDir, "config.json");
+}
+
+async function readInstanceConfig(configPath: string): Promise<Record<string, unknown>> {
+  try {
+    const raw = await readFile(configPath, "utf8");
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+async function writeInstanceConfig(configPath: string, config: Record<string, unknown>): Promise<void> {
+  await mkdir(path.dirname(configPath), { recursive: true });
+  await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
+}
+
+async function runYoloCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+): Promise<boolean> {
+  const { instanceName, args } = extractInstanceOption(argv.slice(1));
+  const configPath = resolveConfigJsonPath(env, instanceName);
+
+  if (args.length === 0) {
+    const config = await readInstanceConfig(configPath);
+    const mode = config.approvalMode ?? "normal";
+    const label =
+      mode === "bypass" ? "YOLO UNSAFE (all approvals and sandbox bypassed)"
+        : mode === "full-auto" ? "YOLO (full-auto, sandboxed)"
+        : "off (normal approval flow)";
+    logger.log(`Instance "${instanceName}": ${label}`);
+    return true;
+  }
+
+  const subcommand = args[0];
+  const config = await readInstanceConfig(configPath);
+  const auditStateDir = resolveAuditStateDir(env, instanceName);
+
+  if (subcommand === "on") {
+    config.approvalMode = "full-auto";
+    await writeInstanceConfig(configPath, config);
+    await appendAuditEvent(auditStateDir, {
+      type: "config.yolo",
+      instanceName,
+      outcome: "success",
+      metadata: { approvalMode: "full-auto" },
+    });
+    logger.log(`Instance "${instanceName}": YOLO mode ON (full-auto, sandboxed). Codex will auto-approve within workspace.`);
+    return true;
+  }
+
+  if (subcommand === "off") {
+    config.approvalMode = "normal";
+    await writeInstanceConfig(configPath, config);
+    await appendAuditEvent(auditStateDir, {
+      type: "config.yolo",
+      instanceName,
+      outcome: "success",
+      metadata: { approvalMode: "normal" },
+    });
+    logger.log(`Instance "${instanceName}": YOLO mode OFF. Normal approval flow restored.`);
+    return true;
+  }
+
+  if (subcommand === "unsafe") {
+    config.approvalMode = "bypass";
+    await writeInstanceConfig(configPath, config);
+    await appendAuditEvent(auditStateDir, {
+      type: "config.yolo",
+      instanceName,
+      outcome: "success",
+      metadata: { approvalMode: "bypass" },
+    });
+    logger.log(`Instance "${instanceName}": YOLO UNSAFE. All approvals AND sandbox bypassed. Use with caution.`);
+    return true;
+  }
+
+  throw new Error("Usage: telegram yolo [on|off|unsafe] [--instance <name>]");
+}
+
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<boolean> {
   const normalized = normalizeCommandArgs(argv);
   const logger = options.logger ?? console;
@@ -569,6 +660,10 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   if (normalized[0] === "instructions") {
     return runInstructionsCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "yolo") {
+    return runYoloCommand(normalized, env, logger);
   }
 
   return false;

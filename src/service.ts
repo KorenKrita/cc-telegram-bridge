@@ -164,7 +164,8 @@ export async function createServiceDependencies(env: EnvSource): Promise<{ confi
   const accessStore = new AccessStore(config.accessStatePath);
   const sessionStore = new SessionStore(config.sessionStatePath);
   const instructionsPath = path.join(config.stateDir, "agent.md");
-  const adapter = new ProcessCodexAdapter(config.codexExecutable, undefined, undefined, instructionsPath);
+  const configPath = path.join(config.stateDir, "config.json");
+  const adapter = new ProcessCodexAdapter(config.codexExecutable, undefined, undefined, instructionsPath, configPath);
   const sessionManager = new SessionManager(sessionStore, adapter);
   const bridge = new Bridge(accessStore, sessionManager, adapter);
 

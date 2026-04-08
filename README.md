@@ -18,7 +18,7 @@
 </h3>
 
 <p align="center">
-  <a href="#-multi-bot-setup">Multi-Bot</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-agent-instructions">agent.md</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-quick-start">Quick Start</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-architecture">Architecture</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-service-operations">Service Ops</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-access-control">Access Control</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-audit-trail">Audit</a>
+  <a href="#-multi-bot-setup">Multi-Bot</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-agent-instructions">agent.md</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-yolo-mode">YOLO Mode</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-quick-start">Quick Start</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-architecture">Architecture</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-service-operations">Service Ops</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-access-control">Access Control</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-audit-trail">Audit</a>
 </p>
 
 ---
@@ -158,6 +158,33 @@ notepad %USERPROFILE%\.codex\channels\telegram\work\agent.md
 
 ---
 
+## YOLO Mode
+
+Operating from your phone? Don't want to deal with approval prompts? Enable YOLO mode per instance.
+
+```powershell
+# Enable YOLO (full-auto, sandboxed — safe default)
+npm run dev -- telegram yolo on --instance work
+
+# Check current mode
+npm run dev -- telegram yolo --instance work
+
+# Disable
+npm run dev -- telegram yolo off --instance work
+```
+
+| Mode | Flag passed to Codex | What it does |
+|---|---|---|
+| `off` | (none) | Normal approval flow — Codex asks before risky actions |
+| `on` | `--full-auto` | Auto-approve within workspace sandbox. Safe for most tasks |
+| `unsafe` | `--dangerously-bypass-approvals-and-sandbox` | Skip ALL approvals and sandbox. Full power, zero guardrails |
+
+YOLO mode is stored per-instance in `config.json` and **hot-reloaded on every message** — toggle it from CLI while the bot is running, no restart needed.
+
+> **Tip**: Use `yolo on` for daily mobile use. Reserve `yolo unsafe` for trusted environments only.
+
+---
+
 ## Why This Design
 
 This is **not** a multiplexed "one process hosts many bots" design. The operating model is deliberately simple:
@@ -198,12 +225,22 @@ The OpenClaw-style experience: you create multiple specialized bots, each with d
   </tr>
   <tr>
     <td>
-      <h3>Full Audit Trail</h3>
-      <p>Every action (pairing, messages, errors, access changes) is recorded in a per-instance append-only JSONL audit stream with timing metadata.</p>
+      <h3>YOLO Mode</h3>
+      <p>One command to let Codex auto-approve everything — perfect for mobile use. Per-instance, hot-reloadable, with a safe <code>full-auto</code> default and an <code>unsafe</code> escape hatch.</p>
     </td>
+    <td>
+      <h3>Full Audit Trail</h3>
+      <p>Every action (pairing, messages, errors, access changes, YOLO toggles) is recorded in a per-instance append-only JSONL audit stream.</p>
+    </td>
+  </tr>
+  <tr>
     <td>
       <h3>Service Lifecycle</h3>
       <p>Start, stop, status, restart, logs, and doctor commands with PID tracking, stderr logs, and bot identity verification.</p>
+    </td>
+    <td>
+      <h3>Attachment Ingestion</h3>
+      <p>Files sent to the bot are downloaded into a per-instance <code>inbox/</code> directory and made available to the Codex session automatically.</p>
     </td>
   </tr>
 </table>
@@ -339,6 +376,7 @@ npm run dev -- telegram audit --chat 688567588
 ```
 %USERPROFILE%\.codex\channels\telegram\<instance>\
 ├── agent.md                # Bot personality & instructions
+├── config.json             # Instance config (YOLO mode, etc.)
 ├── .env                    # Bot token
 ├── access.json             # Pairing + allowlist data
 ├── session.json            # Chat-to-thread bindings

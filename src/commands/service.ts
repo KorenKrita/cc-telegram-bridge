@@ -9,7 +9,14 @@ import { resolveInstanceLockPath, type InstanceLockRecord } from "../state/insta
 import { AccessStore } from "../state/access-store.js";
 import { parseAuditEvents, resolveAuditLogPath, summarizeAuditEvents, type AuditSummary } from "../state/audit-log.js";
 import { TelegramApi } from "../telegram/api.js";
-import { getLastHandledUpdateId, lookupTelegramBotIdentity, readConfiguredBotToken } from "../service.js";
+import {
+  getLastHandledUpdateId,
+  lookupTelegramBotIdentity,
+  readApprovalMode,
+  readConfiguredBotToken,
+  readInstanceEngine,
+  resolveEngineRuntime,
+} from "../service.js";
 import { listSessions } from "./session.js";
 
 export interface ServiceCommandEnv
@@ -40,6 +47,8 @@ export interface ServiceStatus {
   instanceName: string;
   running: boolean;
   pid: number | null;
+  engine: string;
+  runtime: string;
   lockPath: string;
   stateDir: string;
   stdoutPath: string;
@@ -416,6 +425,9 @@ export async function getServiceStatus(
   }
   const accessStore = new AccessStore(path.join(paths.stateDir, "access.json"));
   const accessStatus = await accessStore.getStatus();
+  const configPath = path.join(paths.stateDir, "config.json");
+  const engine = await readInstanceEngine(configPath);
+  const approvalMode = await readApprovalMode(configPath);
   const sessionBindings = (await listSessions(env, paths.instanceName)).length;
   const lastHandledUpdateId = await getLastHandledUpdateId(path.join(paths.stateDir, "inbox"));
   const readToken = deps.readConfiguredBotToken ?? readConfiguredBotToken;
@@ -458,6 +470,8 @@ export async function getServiceStatus(
     instanceName: paths.instanceName,
     running,
     pid: running ? pid : null,
+    engine,
+    runtime: resolveEngineRuntime(engine, approvalMode),
     lockPath: paths.lockPath,
     stateDir: paths.stateDir,
     stdoutPath: paths.stdoutPath,

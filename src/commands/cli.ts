@@ -373,6 +373,8 @@ function formatServiceStatus(status: Awaited<ReturnType<typeof getServiceStatus>
     `Instance: ${status.instanceName}`,
     `Running: ${status.running ? "yes" : "no"}`,
     `Pid: ${status.pid ?? "none"}`,
+    `Engine: ${status.engine}`,
+    `Runtime: ${status.runtime}`,
     `Policy: ${status.policy}`,
     `Paired users: ${status.pairedUsers}`,
     `Allowlist count: ${status.allowlistCount}`,

@@ -172,7 +172,7 @@ export async function resolveServiceEnvForInstance(env: EnvSource, instanceName:
 export type EngineType = "codex" | "claude";
 type ApprovalMode = "normal" | "full-auto" | "bypass";
 
-async function readInstanceEngine(configPath: string): Promise<EngineType> {
+export async function readInstanceEngine(configPath: string): Promise<EngineType> {
   try {
     const raw = await readFile(configPath, "utf8");
     const parsed = JSON.parse(raw) as { engine?: string };
@@ -185,7 +185,7 @@ async function readInstanceEngine(configPath: string): Promise<EngineType> {
   }
 }
 
-async function readApprovalMode(configPath: string): Promise<ApprovalMode> {
+export async function readApprovalMode(configPath: string): Promise<ApprovalMode> {
   try {
     const raw = await readFile(configPath, "utf8");
     const parsed = JSON.parse(raw) as { approvalMode?: string };
@@ -197,6 +197,14 @@ async function readApprovalMode(configPath: string): Promise<ApprovalMode> {
   } catch {
     return "normal";
   }
+}
+
+export function resolveEngineRuntime(engine: EngineType, approvalMode: ApprovalMode): "app-server" | "process" {
+  if (engine === "claude") {
+    return "process";
+  }
+
+  return approvalMode === "normal" ? "app-server" : "process";
 }
 
 function resolveClaudeExecutable(env: EnvSource): string {
@@ -244,7 +252,7 @@ async function createAdapter(
     });
   }
 
-  if (approvalMode === "normal") {
+  if (resolveEngineRuntime(engine, approvalMode) === "app-server") {
     return new CodexAppServerAdapter(config.codexExecutable, process.cwd());
   }
 

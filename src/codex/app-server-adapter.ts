@@ -147,7 +147,9 @@ export class CodexAppServerAdapter implements CodexAdapter {
 
     const instructions = input.instructions ?? (this.instructionsPath ? await this.loadInstructions() : null);
     const prompt = this.buildPrompt(input, instructions);
-    const threadId = isLogicalTelegramSessionId(sessionId) ? await this.startThread() : await this.ensureThreadLoaded(sessionId);
+    const threadId = isLogicalTelegramSessionId(sessionId)
+      ? await this.startThread()
+      : await this.resolveThreadForMessage(sessionId);
     const text = await this.startTurn(threadId, prompt);
 
     return {
@@ -366,6 +368,19 @@ export class CodexAppServerAdapter implements CodexAdapter {
 
     this.loadedThreads.add(resumedThreadId);
     return resumedThreadId;
+  }
+
+  private async resolveThreadForMessage(threadId: string): Promise<string> {
+    try {
+      return await this.ensureThreadLoaded(threadId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/thread not found|no rollout found/i.test(message)) {
+        return await this.startThread();
+      }
+
+      throw error;
+    }
   }
 
   private async startTurn(threadId: string, prompt: string): Promise<string> {

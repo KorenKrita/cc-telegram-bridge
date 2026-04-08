@@ -2,7 +2,7 @@ import { resolveInstanceStateDir, type EnvSource } from "../config.js";
 import { AccessStore } from "../state/access-store.js";
 import { normalizeInstanceName } from "../instance.js";
 import { resolveInstanceAccessStatePath, type InstanceTokenEnv, writeInstanceBotToken } from "./access.js";
-import { appendAuditEvent } from "../state/audit-log.js";
+import { appendAuditEvent, resolveAuditLogPath } from "../state/audit-log.js";
 import { getSessionForChat, listSessions } from "./session.js";
 import {
   getServiceLogs,
@@ -240,6 +240,37 @@ async function runStatusCommand(argv: string[], env: InstanceTokenEnv, logger: C
   return true;
 }
 
+async function runAuditCommand(argv: string[], env: InstanceTokenEnv, logger: CliLogger): Promise<boolean> {
+  const { instanceName, args } = extractInstanceOption(argv.slice(1));
+
+  if (args.length > 1) {
+    throw new Error("Usage: telegram audit [--instance <name>] [tail-count]");
+  }
+
+  const count = args.length === 1 ? parseChatId(args[0]) : 20;
+  const auditPath = resolveAuditLogPath(resolveAuditStateDir(env, instanceName));
+
+  try {
+    const raw = await import("node:fs/promises").then((fs) => fs.readFile(auditPath, "utf8"));
+    const lines = raw.split(/\r?\n/).filter(Boolean).slice(-count);
+    logger.log(lines.length > 0 ? lines.join("\n") : "(empty)");
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      logger.log("(empty)");
+      return true;
+    }
+
+    throw error;
+  }
+
+  return true;
+}
+
 async function runSessionCommand(argv: string[], env: InstanceTokenEnv, logger: CliLogger): Promise<boolean> {
   if (argv.length < 2) {
     throw new Error("Usage: telegram session <list|show> ...");
@@ -390,6 +421,10 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   if (normalized[0] === "session") {
     return runSessionCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "audit") {
+    return runAuditCommand(normalized, env, logger);
   }
 
   return false;

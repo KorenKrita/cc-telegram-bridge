@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="#-quick-start">Quick Start</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-architecture">Architecture</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-service-operations">Service Ops</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-access-control">Access Control</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-troubleshooting">Troubleshooting</a>
+  <a href="#-quick-start">Quick Start</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-architecture">Architecture</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-service-operations">Service Ops</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-access-control">Access Control</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-session-visibility">Sessions</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-audit-trail">Audit</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-troubleshooting">Troubleshooting</a>
 </p>
 
 ---
@@ -174,6 +174,13 @@ Bot identity:  @cloveric6bot
 .\scripts\stop-instance.ps1 [-Instance work]
 ```
 
+### Logs
+
+```powershell
+npm run dev -- telegram service logs
+npm run dev -- telegram service logs --instance work
+```
+
 ---
 
 ## Access Control
@@ -205,6 +212,49 @@ npm run dev -- telegram status
 
 ---
 
+## Session Visibility
+
+List current chat-to-thread bindings:
+
+```powershell
+npm run dev -- telegram session list
+```
+
+Inspect one chat binding:
+
+```powershell
+npm run dev -- telegram session show <chat-id>
+```
+
+This is useful when you want to verify that a Telegram chat is still bound to the same resumed Codex thread.
+
+---
+
+## Audit Trail
+
+Each instance writes an append-only JSONL audit stream:
+
+```text
+%USERPROFILE%\.codex\channels\telegram\<instance>\audit.log.jsonl
+```
+
+Read the latest audit entries:
+
+```powershell
+npm run dev -- telegram audit
+npm run dev -- telegram audit 50
+npm run dev -- telegram audit --instance work
+```
+
+Typical audit events include:
+
+- token configuration
+- pairing success or rejection
+- allow / revoke / policy changes
+- update success / reply / error events
+
+---
+
 ## State Layout
 
 Each instance persists state under a dedicated directory:
@@ -216,6 +266,7 @@ Each instance persists state under a dedicated directory:
 ├── session.json            # Chat-to-thread bindings
 ├── runtime-state.json      # Watermarks, offsets
 ├── instance.lock.json      # Process lock
+├── audit.log.jsonl         # Structured audit stream
 ├── service.stdout.log      # Service stdout
 ├── service.stderr.log      # Service stderr
 └── inbox\                  # Downloaded attachments

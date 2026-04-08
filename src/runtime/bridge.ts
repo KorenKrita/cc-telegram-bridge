@@ -1,5 +1,4 @@
 import type { CodexAdapter } from "../codex/adapter.js";
-import { SessionManager } from "./session-manager.js";
 
 export interface AccessStoreLike {
   load(): Promise<{
@@ -10,10 +9,14 @@ export interface AccessStoreLike {
   }>;
 }
 
+export interface SessionManagerLike {
+  getOrCreateSession(chatId: number): Promise<{ sessionId: string }>;
+}
+
 export class Bridge {
   constructor(
     private readonly accessStore: AccessStoreLike,
-    private readonly sessionManager: SessionManager,
+    private readonly sessionManager: SessionManagerLike,
     private readonly adapter: CodexAdapter,
   ) {}
 
@@ -25,7 +28,7 @@ export class Bridge {
   }) {
     const accessState = await this.accessStore.load();
 
-    if (accessState.policy === "allowlist" && !accessState.allowlist.includes(input.userId)) {
+    if (accessState.policy === "allowlist" && !accessState.allowlist.includes(input.chatId)) {
       throw new Error("User is not in the allowlist");
     }
 

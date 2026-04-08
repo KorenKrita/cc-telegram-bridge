@@ -237,6 +237,17 @@ function formatErrorMessage(scope: string, error: unknown): string {
   return `${scope}: ${message}`;
 }
 
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof Error && /aborted/i.test(error.message)) ||
+    (typeof error === "object" &&
+      error !== null &&
+      "name" in error &&
+      typeof (error as { name?: unknown }).name === "string" &&
+      ((error as { name: string }).name === "AbortError" || /abort/i.test((error as { name: string }).name)))
+  );
+}
+
 export async function processTelegramUpdates(
   updates: unknown[],
   context: TelegramServiceContext,
@@ -346,6 +357,14 @@ export async function pollTelegramUpdatesOnce(
       hadUpdates: updates.length > 0,
     };
   } catch (error) {
+    if (isAbortError(error)) {
+      return {
+        offset,
+        hadFetchError: false,
+        hadUpdates: false,
+      };
+    }
+
     logger.error(formatErrorMessage("Failed to fetch Telegram updates", error));
     return {
       offset,
@@ -372,7 +391,7 @@ export async function pollTelegramUpdates(
 
     if (result.hadFetchError) {
       backoffMs = Math.min(backoffMs * 2, maxBackoffMs);
-    } else if (result.hadUpdates) {
+    } else if (result.hadUpdates && result.offset !== offset) {
       // Got messages — poll again immediately for low latency
       backoffMs = 0;
     } else {

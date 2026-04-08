@@ -15,6 +15,10 @@ export interface EnvSource {
 }
 
 function resolveHomeDir(env: Pick<EnvSource, "HOME" | "USERPROFILE">): string | undefined {
+  if (process.platform === "win32") {
+    return env.USERPROFILE ?? env.HOME;
+  }
+
   return env.HOME ?? env.USERPROFILE;
 }
 
@@ -71,7 +75,7 @@ export function resolveInstanceStateDir(
 
   const homeDir = resolveHomeDir(env);
   if (!homeDir) {
-    throw new Error("HOME or USERPROFILE is required");
+    throw new Error(process.platform === "win32" ? "USERPROFILE or HOME is required" : "HOME or USERPROFILE is required");
   }
 
   return path.join(homeDir, ".codex", "channels", "telegram", instanceName);

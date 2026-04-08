@@ -15,12 +15,22 @@ describe("resolveConfig", () => {
     expect(config.telegramBotToken).toBe("abc123");
   });
 
+  it("prefers USERPROFILE over HOME on Windows-style paths", () => {
+    const config = resolveConfig({
+      HOME: "C:\\msys64\\home\\hangw",
+      USERPROFILE: "C:\\Users\\hangw",
+      TELEGRAM_BOT_TOKEN: "abc123",
+    });
+
+    expect(config.stateDir).toBe("C:\\Users\\hangw\\.codex\\channels\\telegram\\default");
+  });
+
   it("throws when USERPROFILE is missing", () => {
     expect(() =>
       resolveConfig({
         TELEGRAM_BOT_TOKEN: "abc123",
       }),
-    ).toThrow("USERPROFILE is required");
+    ).toThrow("USERPROFILE or HOME is required");
   });
 
   it("throws when TELEGRAM_BOT_TOKEN is missing", () => {

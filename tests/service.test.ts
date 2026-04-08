@@ -8,6 +8,7 @@ import {
   createServiceDependenciesForInstance,
   parseServiceInstanceName,
   pollTelegramUpdatesOnce,
+  pollTelegramUpdates,
   processTelegramUpdates,
   readInstanceBotTokenFromEnvFile,
 } from "../src/service.js";
@@ -403,6 +404,77 @@ describe("polling helpers", () => {
     });
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalled();
+  });
+
+  it("treats aborted polling as a clean shutdown instead of a fetch failure", async () => {
+    const logger = {
+      error: vi.fn(),
+    };
+    const api = {
+      getUpdates: vi.fn().mockRejectedValue(new Error("Telegram API request aborted")),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn(),
+    };
+
+    await expect(
+      pollTelegramUpdatesOnce(api as never, bridge as never, path.join(os.tmpdir(), "ignored"), logger, 7),
+    ).resolves.toEqual({
+      offset: 7,
+      hadFetchError: false,
+      hadUpdates: false,
+    });
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("does not enter immediate retry when updates failed before offset advanced", async () => {
+    const logger = {
+      error: vi.fn(),
+    };
+    const api = {
+      getUpdates: vi
+        .fn()
+        .mockResolvedValueOnce([
+          {
+            update_id: 10,
+            message: {
+              chat: { id: 123, type: "private" },
+              from: { id: 456 },
+              text: "first",
+            },
+          },
+        ])
+        .mockResolvedValueOnce([]),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockRejectedValue(new Error("boom")),
+    };
+    const sleepCalls: number[] = [];
+    const originalSetTimeout = globalThis.setTimeout;
+
+    try {
+      const controller = new AbortController();
+      let pollCount = 0;
+      globalThis.setTimeout = (((handler: TimerHandler, timeout?: number) => {
+        sleepCalls.push(Number(timeout ?? 0));
+        if (typeof handler === "function") {
+          queueMicrotask(() => handler());
+        }
+        pollCount += 1;
+        if (pollCount >= 2) {
+          controller.abort();
+        }
+        return {} as ReturnType<typeof setTimeout>;
+      }) as unknown) as typeof setTimeout;
+
+      await pollTelegramUpdates(api as never, bridge as never, path.join(os.tmpdir(), "ignored"), logger, controller.signal);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+
+    expect(sleepCalls[0]).toBe(100);
   });
 
   it("serializes same-chat updates through the service chat queue", async () => {

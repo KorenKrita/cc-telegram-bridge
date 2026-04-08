@@ -23,7 +23,7 @@ describe("telegram service commands", () => {
         logger: { log: (message) => messages.push(message) },
         serviceDeps: {
           cwd: REPO_ROOT,
-          spawnDetached: (command, args) => {
+          spawnDetached: (command, args, options) => {
             mkdir(stateDir, { recursive: true }).then(() =>
               writeFile(
                 lockPath,
@@ -35,7 +35,7 @@ describe("telegram service commands", () => {
                 "utf8",
               ),
             );
-            spawnDetached(command, args);
+            spawnDetached(command, args, options);
           },
           sleep: async () => {},
           isProcessAlive: (pid) => pid === 12345,
@@ -46,6 +46,15 @@ describe("telegram service commands", () => {
       expect(handled).toBe(true);
       expect(messages).toEqual(['Started instance "alpha" with pid 12345.']);
       expect(spawnDetached).toHaveBeenCalledTimes(1);
+      expect(spawnDetached).toHaveBeenCalledWith(
+        process.execPath,
+        [path.join(REPO_ROOT, "dist", "src", "index.js"), "--instance", "alpha"],
+        {
+          cwd: REPO_ROOT,
+          stdoutPath: path.join(stateDir, "service.stdout.log"),
+          stderrPath: path.join(stateDir, "service.stderr.log"),
+        },
+      );
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -175,8 +184,15 @@ describe("telegram service commands", () => {
         logger: { log: (message) => messages.push(message) },
         serviceDeps: {
           cwd: tempDir,
-          isProcessAlive: (pid) => pid === 54321,
+          isProcessAlive: (() => {
+            let calls = 0;
+            return (pid: number) => {
+              calls += 1;
+              return pid === 54321 && calls < 2;
+            };
+          })(),
           isExpectedServiceProcess: (pid) => pid === 54321,
+          sleep: async () => {},
           killProcessTree,
         },
       });

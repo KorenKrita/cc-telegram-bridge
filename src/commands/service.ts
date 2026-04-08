@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { closeSync, existsSync, openSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 
@@ -17,7 +17,7 @@ export interface ServiceCommandDeps {
   cwd?: string;
   isProcessAlive?: (pid: number) => boolean;
   isExpectedServiceProcess?: (pid: number, entryPath: string, instanceName: string) => boolean;
-  spawnDetached?: (command: string, args: string[]) => void;
+  spawnDetached?: (command: string, args: string[], options: { cwd: string; stdoutPath: string; stderrPath: string }) => void;
   sleep?: (ms: number) => Promise<void>;
   killProcessTree?: (pid: number) => void;
   readConfiguredBotToken?: (env: ServiceCommandEnv, instanceName: string) => Promise<string | null>;
@@ -81,30 +81,45 @@ function defaultIsExpectedServiceProcess(pid: number, entryPath: string, instanc
     `
       $proc = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}";
       if ($null -eq $proc) { exit 1 }
-      $cmd = $proc.CommandLine;
-      if (
-        ($cmd -like "*${entryPath.replace(/\\/g, "\\\\")}*" -or $cmd -like "*${relativeEntryPath}*" -or $cmd -like "*dist/src/index.js*") -and
-        $cmd -like "*--instance ${instanceName}*"
-      ) { exit 0 }
-      exit 1
+      $proc.CommandLine
     `,
     "utf16le",
   ).toString("base64");
 
   const result = spawnSync("pwsh", ["-NoProfile", "-EncodedCommand", encoded], {
     windowsHide: true,
+    encoding: "utf8",
   });
 
-  return result.status === 0;
+  if (result.status !== 0 || !result.stdout) {
+    return false;
+  }
+
+  const commandLine = result.stdout.trim().toLowerCase();
+  return (
+    (commandLine.includes(entryPath.toLowerCase()) ||
+      commandLine.includes(relativeEntryPath.toLowerCase()) ||
+      commandLine.includes("dist/src/index.js")) &&
+    commandLine.includes(`--instance ${instanceName.toLowerCase()}`)
+  );
 }
 
-function defaultSpawnDetached(command: string, args: string[]): void {
+function defaultSpawnDetached(
+  command: string,
+  args: string[],
+  options: { cwd: string; stdoutPath: string; stderrPath: string },
+): void {
+  const stdoutFd = openSync(options.stdoutPath, "a");
+  const stderrFd = openSync(options.stderrPath, "a");
   const child = spawn(command, args, {
+    cwd: options.cwd,
     detached: true,
-    stdio: "ignore",
+    stdio: ["ignore", stdoutFd, stderrFd],
     windowsHide: true,
   });
   child.unref();
+  closeSync(stdoutFd);
+  closeSync(stderrFd);
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -222,16 +237,14 @@ export async function startServiceInstance(
   }
 
   await mkdir(paths.stateDir, { recursive: true });
+  await writeFile(paths.stdoutPath, "", "utf8");
+  await writeFile(paths.stderrPath, "", "utf8");
 
-  const command = "pwsh";
-  const script = [
-    `Set-Location '${cwd.replace(/'/g, "''")}'`,
-    `node '${paths.entryPath.replace(/'/g, "''")}' --instance ${paths.instanceName}`,
-    `1>> '${paths.stdoutPath.replace(/'/g, "''")}'`,
-    `2>> '${paths.stderrPath.replace(/'/g, "''")}'`,
-  ].join("; ");
-
-  spawnDetachedProcess(command, ["-NoProfile", "-Command", script]);
+  spawnDetachedProcess(process.execPath, [paths.entryPath, "--instance", paths.instanceName], {
+    cwd,
+    stdoutPath: paths.stdoutPath,
+    stderrPath: paths.stderrPath,
+  });
 
   for (let attempt = 0; attempt < 20; attempt++) {
     const lock = await readLockRecord(paths.lockPath);
@@ -259,6 +272,7 @@ export async function stopServiceInstance(
   const isProcessAlive = deps.isProcessAlive ?? defaultIsProcessAlive;
   const isExpectedServiceProcess = deps.isExpectedServiceProcess ?? defaultIsExpectedServiceProcess;
   const killProcessTree = deps.killProcessTree ?? defaultKillProcessTree;
+  const sleep = deps.sleep ?? defaultSleep;
 
   const existingLock = await readLockRecord(paths.lockPath);
   if (
@@ -270,7 +284,16 @@ export async function stopServiceInstance(
   }
 
   killProcessTree(existingLock.pid);
-  return `Stopped instance "${paths.instanceName}".`;
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (!isProcessAlive(existingLock.pid)) {
+      return `Stopped instance "${paths.instanceName}".`;
+    }
+
+    await sleep(250);
+  }
+
+  throw new Error(`Instance "${paths.instanceName}" did not stop cleanly.`);
 }
 
 export async function getServiceStatus(

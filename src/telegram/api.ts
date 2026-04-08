@@ -23,6 +23,10 @@ function isTelegramApiResponse<T>(value: unknown): value is TelegramApiResponse<
     return "result" in value;
   }
 
+  if ("description" in value && typeof value.description !== "string") {
+    return false;
+  }
+
   return true;
 }
 

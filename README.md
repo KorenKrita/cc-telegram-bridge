@@ -236,11 +236,11 @@ The OpenClaw-style experience: you create multiple specialized bots, each with d
   <tr>
     <td>
       <h3>Service Lifecycle</h3>
-      <p>Start, stop, status, restart, logs, and doctor commands with PID tracking, stderr logs, and bot identity verification.</p>
+      <p>Start, stop, status, restart, logs, and doctor commands with PID tracking, graceful SIGTERM/SIGINT shutdown, and bot identity verification.</p>
     </td>
     <td>
-      <h3>Attachment Ingestion</h3>
-      <p>Files sent to the bot are downloaded into a per-instance <code>inbox/</code> directory and made available to the Codex session automatically.</p>
+      <h3>Production Resilience</h3>
+      <p>Exponential backoff on polling errors (1s → 60s), Telegram 429 rate limit auto-retry, fault-tolerant update processing (one failure doesn't drop the batch).</p>
     </td>
   </tr>
 </table>
@@ -316,12 +316,13 @@ Telegram Update → Normalize → Access Check → Chat Queue (serialized)
 
 | Command | Description |
 |---|---|
-| `telegram service start` | Acquire lock, load state, begin polling |
-| `telegram service stop` | Graceful shutdown with state persistence |
+| `telegram service start` | Acquire lock, load state, begin polling with exponential backoff |
+| `telegram service stop` | Graceful shutdown (SIGTERM/SIGINT) with state persistence |
 | `telegram service status` | Running state, PID, session bindings, bot identity, audit health |
 | `telegram service restart` | Stop + start with clean consumer reset |
 | `telegram service logs` | Tail stdout/stderr logs |
 | `telegram service doctor` | Health check: build, token, runtime, identity, sessions, audit |
+| `telegram help` | Show all available commands |
 
 All commands accept `--instance <name>` to target a specific bot.
 

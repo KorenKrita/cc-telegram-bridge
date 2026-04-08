@@ -625,10 +625,32 @@ async function runYoloCommand(
   throw new Error("Usage: telegram yolo [on|off|unsafe] [--instance <name>]");
 }
 
+const HELP_TEXT = `Usage: telegram <command> [options]
+
+Commands:
+  configure <token> [--instance <name>]       Configure bot token for an instance
+  service <start|stop|restart|status|logs|doctor> [--instance <name>]
+                                              Manage the service lifecycle
+  access <pair|policy|allow|revoke> [--instance <name>]
+                                              Manage access control
+  status [--instance <name>]                  Show access policy and paired users
+  session <list|show> [--instance <name>]     Inspect chat-to-thread bindings
+  audit [count] [--instance <name>] [--type <type>] [--chat <id>] [--outcome <outcome>]
+                                              View audit trail
+  instructions <show|set|path> [--instance <name>]
+                                              Manage per-instance agent.md
+  yolo [on|off|unsafe] [--instance <name>]    Toggle YOLO auto-approval mode
+  help                                        Show this help message`;
+
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<boolean> {
   const normalized = normalizeCommandArgs(argv);
   const logger = options.logger ?? console;
   const env = options.env ?? process.env;
+
+  if (normalized.length === 0 || normalized[0] === "help" || normalized[0] === "--help") {
+    logger.log(HELP_TEXT);
+    return true;
+  }
 
   if (normalized[0] === "configure") {
     const { instanceName, botToken } = parseConfigureCommand(normalized);

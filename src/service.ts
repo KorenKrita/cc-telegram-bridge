@@ -312,7 +312,12 @@ export async function processTelegramUpdates(
         detail: error instanceof Error ? error.message : String(error),
       });
       logger.error(formatErrorMessage("Failed to handle Telegram update", error));
-      break;
+      if (updateId !== undefined) {
+        await runtimeStateStore.markHandledUpdateId(updateId);
+        lastHandledUpdateId = updateId;
+      }
+      nextOffset = advanceOffset(nextOffset, completedOffset);
+      continue;
     }
   }
 
@@ -346,11 +351,25 @@ export async function pollTelegramUpdates(
   bridge: Bridge,
   inboxDir: string,
   logger: Pick<Console, "error"> = console,
+  signal?: AbortSignal,
 ): Promise<void> {
   let offset: number | undefined;
+  let backoffMs = 1000;
+  const maxBackoffMs = 60000;
 
-  for (;;) {
+  while (!signal?.aborted) {
+    const previousOffset = offset;
     offset = await pollTelegramUpdatesOnce(api, bridge, inboxDir, logger, offset);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    if (offset !== previousOffset) {
+      backoffMs = 1000;
+    } else {
+      backoffMs = Math.min(backoffMs * 2, maxBackoffMs);
+    }
+
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, backoffMs);
+      signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
   }
 }

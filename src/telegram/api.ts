@@ -86,6 +86,15 @@ export class TelegramApi {
     body: Record<string, unknown>,
     validateResult?: (value: unknown) => value is T,
   ): Promise<T> {
+    return this.postJsonOnce(method, body, validateResult, true);
+  }
+
+  private async postJsonOnce<T>(
+    method: string,
+    body: Record<string, unknown>,
+    validateResult: ((value: unknown) => value is T) | undefined,
+    allowRetry: boolean,
+  ): Promise<T> {
     const response = await fetch(this.buildUrl(method), {
       method: "POST",
       headers: {
@@ -93,6 +102,20 @@ export class TelegramApi {
       },
       body: JSON.stringify(body),
     });
+
+    if (response.status === 429 && allowRetry) {
+      let retryAfterSeconds = 5;
+      try {
+        const errorBody = await response.json() as { parameters?: { retry_after?: number } };
+        if (typeof errorBody?.parameters?.retry_after === "number") {
+          retryAfterSeconds = errorBody.parameters.retry_after;
+        }
+      } catch {
+        // Use default retry_after
+      }
+      await new Promise((resolve) => setTimeout(resolve, retryAfterSeconds * 1000));
+      return this.postJsonOnce(method, body, validateResult, false);
+    }
 
     if (!response.ok) {
       throw new Error(`Telegram API request failed for ${method}: ${response.status} ${response.statusText}`);

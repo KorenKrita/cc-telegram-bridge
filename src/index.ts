@@ -35,10 +35,19 @@ async function main(): Promise<void> {
 
     process.once("exit", releaseLockOnExit);
 
+    const abortController = new AbortController();
+    const shutdown = () => {
+      abortController.abort();
+    };
+    process.once("SIGTERM", shutdown);
+    process.once("SIGINT", shutdown);
+
     const { api, bridge, config } = await createServiceDependencies(resolvedEnv);
     try {
-      await pollTelegramUpdates(api, bridge, config.inboxDir);
+      await pollTelegramUpdates(api, bridge, config.inboxDir, console, abortController.signal);
     } finally {
+      process.removeListener("SIGTERM", shutdown);
+      process.removeListener("SIGINT", shutdown);
       process.removeListener("exit", releaseLockOnExit);
       await instanceLock.release();
     }

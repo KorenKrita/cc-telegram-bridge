@@ -326,13 +326,13 @@ describe("polling helpers", () => {
         .mockRejectedValueOnce(new Error("boom")),
     };
 
-    await expect(pollTelegramUpdatesOnce(api as never, bridge as never, path.join(os.tmpdir(), "ignored"), logger, 7)).resolves.toBe(11);
+    await expect(pollTelegramUpdatesOnce(api as never, bridge as never, path.join(os.tmpdir(), "ignored"), logger, 7)).resolves.toBe(12);
 
     expect(bridge.handleAuthorizedMessage).toHaveBeenCalledTimes(2);
     expect(logger.error).toHaveBeenCalledTimes(1);
   });
 
-  it("stops processing later updates after a hard failure", async () => {
+  it("continues processing later updates after a failed update", async () => {
     const logger = {
       error: vi.fn(),
     };
@@ -372,7 +372,7 @@ describe("polling helpers", () => {
       logger,
     );
 
-    expect(bridge.handleAuthorizedMessage).toHaveBeenCalledTimes(1);
+    expect(bridge.handleAuthorizedMessage).toHaveBeenCalledTimes(2);
     expect(logger.error).toHaveBeenCalledTimes(1);
   });
 

@@ -31,13 +31,13 @@ describe("ProcessCodexAdapter", () => {
     const calls: Array<{
       command: string;
       args: string[];
-      options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv };
+      options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv; windowsHide?: boolean };
     }> = [];
     const child = new FakeChildProcess();
     const spawnCodex = (
       command: string,
       args: string[],
-      options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv },
+      options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv; windowsHide?: boolean },
     ) => {
       calls.push({ command, args, options });
       return child;
@@ -59,7 +59,7 @@ describe("ProcessCodexAdapter", () => {
     expect(calls[0]).toMatchObject({
       command: "codex",
       args: ["exec", "--json", "Hello\nAttachment: a.png\nAttachment: b.pdf"],
-      options: { stdio: ["ignore", "pipe", "pipe"], shell: false },
+      options: { stdio: ["ignore", "pipe", "pipe"], shell: false, windowsHide: true },
     });
     expect(calls[0]?.options.env?.TELEGRAM_BOT_TOKEN).toBeUndefined();
   });
@@ -68,13 +68,13 @@ describe("ProcessCodexAdapter", () => {
     const calls: Array<{
       command: string;
       args: string[];
-      options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv };
+      options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv; windowsHide?: boolean };
     }> = [];
     const child = new FakeChildProcess();
     const spawnCodex = (
       command: string,
       args: string[],
-      options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv },
+      options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv; windowsHide?: boolean },
     ) => {
       calls.push({ command, args, options });
       return child;
@@ -99,6 +99,7 @@ describe("ProcessCodexAdapter", () => {
       "C:\\Users\\hangw\\AppData\\Roaming\\npm\\codex.cmd",
       "exec",
     ]);
+    expect(calls[0]?.options.windowsHide).toBe(true);
   });
 
   it("returns trimmed stdout when codex exits successfully", async () => {
@@ -257,12 +258,12 @@ function createSpawnHarness() {
   const calls: Array<{
     command: string;
     args: string[];
-    options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv };
+    options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv; windowsHide?: boolean };
   }> = [];
   const spawnCodex = (
     command: string,
     args: string[],
-    options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv },
+    options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv; windowsHide?: boolean },
   ) => {
     calls.push({ command, args, options });
     return child;

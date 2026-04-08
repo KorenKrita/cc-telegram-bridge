@@ -12,6 +12,7 @@ type SpawnOptions = {
   stdio: ["ignore", "pipe", "pipe"];
   shell?: boolean;
   env?: NodeJS.ProcessEnv;
+  windowsHide?: boolean;
 };
 
 type ProcessStreamLike = {
@@ -253,6 +254,7 @@ export class ProcessCodexAdapter implements CodexAdapter {
       stdio: ["ignore", "pipe", "pipe"],
       shell: invocation.shell,
       env: this.childEnv,
+      windowsHide: true,
     });
 
     return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {

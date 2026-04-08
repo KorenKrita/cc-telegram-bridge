@@ -163,7 +163,8 @@ export async function createServiceDependencies(env: EnvSource): Promise<{ confi
   const api = new TelegramApi(config.telegramBotToken);
   const accessStore = new AccessStore(config.accessStatePath);
   const sessionStore = new SessionStore(config.sessionStatePath);
-  const adapter = new ProcessCodexAdapter(config.codexExecutable);
+  const instructionsPath = path.join(config.stateDir, "agent.md");
+  const adapter = new ProcessCodexAdapter(config.codexExecutable, undefined, undefined, instructionsPath);
   const sessionManager = new SessionManager(sessionStore, adapter);
   const bridge = new Bridge(accessStore, sessionManager, adapter);
 

@@ -1,4 +1,9 @@
 import type { CodexAdapter } from "../codex/adapter.js";
+import {
+  renderPairingMessage,
+  renderPrivateChatRequiredMessage,
+  renderUnauthorizedMessage,
+} from "../telegram/message-renderer.js";
 
 export interface AccessStoreLike {
   load(): Promise<{
@@ -6,6 +11,7 @@ export interface AccessStoreLike {
     allowlist: number[];
     pendingPairs: unknown[];
     pairedUsers: Array<{
+      telegramUserId: number;
       telegramChatId: number;
     }>;
   }>;
@@ -47,21 +53,21 @@ export class Bridge {
     if (input.chatType !== "private") {
       return {
         kind: "reply",
-        text: "Only private chats are supported.",
+        text: renderPrivateChatRequiredMessage(),
       };
     }
 
     if (accessState.policy === "allowlist" && !accessState.allowlist.includes(input.chatId)) {
       return {
         kind: "deny",
-        text: "This chat is not authorized.",
+        text: renderUnauthorizedMessage(),
       };
     }
 
     if (
       accessState.policy === "pairing" &&
       !accessState.pairedUsers.some(
-        (user) => user.telegramChatId === input.chatId && input.userId === input.chatId,
+        (user) => user.telegramChatId === input.chatId && user.telegramUserId === input.userId,
       )
     ) {
       const pendingPair = await this.accessStore.issuePairingCode({
@@ -72,7 +78,7 @@ export class Bridge {
 
       return {
         kind: "reply",
-        text: `Pair this chat with code ${pendingPair.code}`,
+        text: renderPairingMessage(pendingPair.code),
       };
     }
 
@@ -88,11 +94,11 @@ export class Bridge {
   }) {
     const decision = await this.checkAccess(input);
     if (decision.kind === "deny") {
-      throw new Error(decision.text ?? "This chat is not authorized.");
+      throw new Error(decision.text ?? renderUnauthorizedMessage());
     }
     if (decision.kind === "reply") {
       return {
-        text: decision.text ?? "This chat is not authorized.",
+        text: decision.text ?? renderUnauthorizedMessage(),
       };
     }
 

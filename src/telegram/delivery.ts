@@ -3,7 +3,15 @@ import path from "node:path";
 
 import { Bridge } from "../runtime/bridge.js";
 import { appendAuditEvent } from "../state/audit-log.js";
-import { chunkTelegramMessage, renderErrorMessage, renderWorkingMessage } from "./message-renderer.js";
+import {
+  chunkTelegramMessage,
+  renderAccessCheckMessage,
+  renderAttachmentDownloadMessage,
+  renderErrorMessage,
+  renderExecutionMessage,
+  renderUnauthorizedMessage,
+  renderWorkingMessage,
+} from "./message-renderer.js";
 import { TelegramApi } from "./api.js";
 import type { NormalizedTelegramAttachment, NormalizedTelegramMessage } from "./update-normalizer.js";
 
@@ -93,13 +101,14 @@ export async function handleNormalizedTelegramMessage(
   normalized: NormalizedTelegramMessage,
   context: TelegramDeliveryContext,
 ): Promise<void> {
+  const startedAt = Date.now();
   let placeholderMessageId: number | undefined;
   let placeholderShowsResponse = false;
 
   try {
     const placeholder = await context.api.sendMessage(normalized.chatId, renderWorkingMessage());
     placeholderMessageId = placeholder.message_id;
-    await context.api.editMessage(normalized.chatId, placeholderMessageId, "Checking access...");
+    await context.api.editMessage(normalized.chatId, placeholderMessageId, renderAccessCheckMessage());
 
     const accessDecision = await context.bridge.checkAccess({
       chatId: normalized.chatId,
@@ -111,7 +120,7 @@ export async function handleNormalizedTelegramMessage(
       await context.api.editMessage(
         normalized.chatId,
         placeholderMessageId,
-        accessDecision.text ?? renderErrorMessage("This chat is not authorized."),
+        accessDecision.text ?? renderErrorMessage(renderUnauthorizedMessage()),
       );
       await appendAuditEvent(path.dirname(context.inboxDir), {
         type: "update.reply",
@@ -121,6 +130,10 @@ export async function handleNormalizedTelegramMessage(
         updateId: context.updateId,
         outcome: "reply",
         detail: accessDecision.text,
+        metadata: {
+          durationMs: Date.now() - startedAt,
+          attachments: normalized.attachments.length,
+        },
       });
       return;
     }
@@ -129,12 +142,12 @@ export async function handleNormalizedTelegramMessage(
       await context.api.editMessage(
         normalized.chatId,
         placeholderMessageId,
-        `Downloading ${normalized.attachments.length} attachment${normalized.attachments.length === 1 ? "" : "s"}...`,
+        renderAttachmentDownloadMessage(normalized.attachments.length),
       );
     }
 
     const files = await downloadAttachments(context.api, context.inboxDir, normalized.attachments);
-    await context.api.editMessage(normalized.chatId, placeholderMessageId, "Running Codex...");
+    await context.api.editMessage(normalized.chatId, placeholderMessageId, renderExecutionMessage());
     const result = await context.bridge.handleAuthorizedMessage({
       chatId: normalized.chatId,
       userId: normalized.userId,
@@ -153,6 +166,12 @@ export async function handleNormalizedTelegramMessage(
       userId: normalized.userId,
       updateId: context.updateId,
       outcome: "success",
+      metadata: {
+        durationMs: Date.now() - startedAt,
+        attachments: normalized.attachments.length,
+        responseChars: result.text.length,
+        chunkCount: chunkTelegramMessage(result.text).length,
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -173,6 +192,10 @@ export async function handleNormalizedTelegramMessage(
       updateId: context.updateId,
       outcome: "error",
       detail: message,
+      metadata: {
+        durationMs: Date.now() - startedAt,
+        attachments: normalized.attachments.length,
+      },
     });
 
     throw error;

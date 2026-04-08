@@ -76,7 +76,7 @@ describe("Bridge", () => {
         text: "hello",
         files: [],
       }),
-    ).rejects.toThrow("This chat is not authorized.");
+    ).rejects.toThrow("This chat is not authorized for this instance.");
     expect(sessionManager.getOrCreateSession).not.toHaveBeenCalled();
     expect(adapter.sendUserMessage).not.toHaveBeenCalled();
   });
@@ -105,17 +105,17 @@ describe("Bridge", () => {
     const bridge = new Bridge(accessStore, sessionManager, adapter);
     const result = await bridge.handleAuthorizedMessage({
       chatId: 84,
-      userId: 84,
+      userId: 42,
       chatType: "private",
       text: "hello",
       files: [],
     });
 
     expect(result).toEqual({
-      text: "Pair this chat with code ABC123",
+      text: "Pair this private chat with code ABC123",
     });
     expect(accessStore.issuePairingCode).toHaveBeenCalledWith({
-      telegramUserId: 84,
+      telegramUserId: 42,
       telegramChatId: 84,
       now: expect.any(Date),
     });
@@ -151,7 +151,7 @@ describe("Bridge", () => {
     const bridge = new Bridge(accessStore, sessionManager, adapter);
     const result = await bridge.handleAuthorizedMessage({
       chatId: 84,
-      userId: 84,
+      userId: 42,
       chatType: "private",
       text: "hello",
       files: [],
@@ -194,7 +194,7 @@ describe("Bridge", () => {
         files: [],
       });
 
-      expect(result.text).toMatch(/^Pair this chat with code [A-Z2-9]{6}$/);
+      expect(result.text).toMatch(/^Pair this private chat with code [A-Z2-9]{6}$/);
       expect(sessionManager.getOrCreateSession).not.toHaveBeenCalled();
       expect(adapter.sendUserMessage).not.toHaveBeenCalled();
     } finally {
@@ -206,7 +206,7 @@ describe("Bridge", () => {
     const accessStore: AccessStoreLike = {
       load: vi.fn().mockResolvedValue({
         policy: "pairing",
-        pairedUsers: [{ telegramChatId: 84 }],
+        pairedUsers: [{ telegramChatId: 84, telegramUserId: 84 }],
         allowlist: [],
         pendingPairs: [],
       }),
@@ -232,5 +232,36 @@ describe("Bridge", () => {
 
     expect(result).toEqual({ text: "done", sessionId: "thread-123" });
     expect(sessionManager.bindSession).toHaveBeenCalledWith(84, "thread-123");
+  });
+
+  it("rejects non-private chats with a product-facing message", async () => {
+    const accessStore: AccessStoreLike = {
+      load: vi.fn().mockResolvedValue({
+        policy: "allowlist",
+        pairedUsers: [],
+        allowlist: [84],
+        pendingPairs: [],
+      }),
+      issuePairingCode: vi.fn(),
+    };
+    const sessionManager: SessionManagerLike = {
+      getOrCreateSession: vi.fn(),
+      bindSession: vi.fn(),
+    };
+    const adapter: CodexAdapter = {
+      sendUserMessage: vi.fn(),
+      createSession: vi.fn(),
+    };
+
+    const bridge = new Bridge(accessStore, sessionManager, adapter);
+    await expect(
+      bridge.handleAuthorizedMessage({
+        chatId: 84,
+        userId: 84,
+        chatType: "group",
+        text: "hello",
+        files: [],
+      }),
+    ).resolves.toEqual({ text: "This bot only accepts private chats." });
   });
 });

@@ -10,6 +10,7 @@ export interface CodexAdapterResponse {
 export interface CodexUserMessageInput {
   text: string;
   files: string[];
+  instructions?: string;
 }
 
 export interface CodexAdapter {

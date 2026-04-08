@@ -1,12 +1,22 @@
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import path from "node:path";
+
 import { resolveInstanceStateDir, type EnvSource } from "../config.js";
 import { AccessStore } from "../state/access-store.js";
 import { normalizeInstanceName } from "../instance.js";
 import { resolveInstanceAccessStatePath, type InstanceTokenEnv, writeInstanceBotToken } from "./access.js";
-import { appendAuditEvent, resolveAuditLogPath } from "../state/audit-log.js";
+import {
+  appendAuditEvent,
+  filterAuditEvents,
+  parseAuditEvents,
+  resolveAuditLogPath,
+  type AuditEventFilter,
+} from "../state/audit-log.js";
 import { getSessionForChat, listSessions } from "./session.js";
 import {
   getServiceLogs,
   getServiceStatus,
+  runServiceDoctor,
   startServiceInstance,
   stopServiceInstance,
   type ServiceCommandDeps,
@@ -77,6 +87,15 @@ function parseChatId(value: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed)) {
     throw new Error(`Invalid chat id: ${value}`);
+  }
+
+  return parsed;
+}
+
+function parsePositiveInteger(value: string, fieldName: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${fieldName}: ${value}`);
   }
 
   return parsed;
@@ -242,17 +261,50 @@ async function runStatusCommand(argv: string[], env: InstanceTokenEnv, logger: C
 
 async function runAuditCommand(argv: string[], env: InstanceTokenEnv, logger: CliLogger): Promise<boolean> {
   const { instanceName, args } = extractInstanceOption(argv.slice(1));
+  const filter: AuditEventFilter = { tail: 20 };
 
-  if (args.length > 1) {
-    throw new Error("Usage: telegram audit [--instance <name>] [tail-count]");
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index];
+
+    if (/^\d+$/.test(argument)) {
+      filter.tail = parsePositiveInteger(argument, "tail count");
+      continue;
+    }
+
+    if (argument === "--type") {
+      if (index + 1 >= args.length) {
+        throw new Error("Usage: telegram audit [--instance <name>] [tail-count] [--type <event-type>] [--chat <chat-id>] [--outcome <outcome>]");
+      }
+      filter.type = args[index + 1];
+      index++;
+      continue;
+    }
+
+    if (argument === "--chat") {
+      if (index + 1 >= args.length) {
+        throw new Error("Usage: telegram audit [--instance <name>] [tail-count] [--type <event-type>] [--chat <chat-id>] [--outcome <outcome>]");
+      }
+      filter.chatId = parseChatId(args[index + 1]);
+      index++;
+      continue;
+    }
+
+    if (argument === "--outcome") {
+      if (index + 1 >= args.length) {
+        throw new Error("Usage: telegram audit [--instance <name>] [tail-count] [--type <event-type>] [--chat <chat-id>] [--outcome <outcome>]");
+      }
+      filter.outcome = args[index + 1];
+      index++;
+      continue;
+    }
+
+    throw new Error("Usage: telegram audit [--instance <name>] [tail-count] [--type <event-type>] [--chat <chat-id>] [--outcome <outcome>]");
   }
-
-  const count = args.length === 1 ? parseChatId(args[0]) : 20;
   const auditPath = resolveAuditLogPath(resolveAuditStateDir(env, instanceName));
 
   try {
     const raw = await import("node:fs/promises").then((fs) => fs.readFile(auditPath, "utf8"));
-    const lines = raw.split(/\r?\n/).filter(Boolean).slice(-count);
+    const lines = filterAuditEvents(parseAuditEvents(raw), filter).map((event) => JSON.stringify(event));
     logger.log(lines.length > 0 ? lines.join("\n") : "(empty)");
   } catch (error) {
     if (
@@ -324,7 +376,11 @@ function formatServiceStatus(status: Awaited<ReturnType<typeof getServiceStatus>
     `Paired users: ${status.pairedUsers}`,
     `Allowlist count: ${status.allowlistCount}`,
     `Pending pair count: ${status.pendingPairs}`,
+    `Session bindings: ${status.sessionBindings}`,
     `Last handled update: ${status.lastHandledUpdateId ?? "none"}`,
+    `Audit events: ${status.auditEvents}`,
+    `Last success: ${status.lastSuccessAt ?? "none"}`,
+    `Last failure: ${status.lastFailureAt ?? "none"}`,
     `State dir: ${status.stateDir}`,
     `Stdout log: ${status.stdoutPath}`,
     `Stderr log: ${status.stderrPath}`,
@@ -348,6 +404,14 @@ function formatServiceStatus(status: Awaited<ReturnType<typeof getServiceStatus>
   return lines.join("\n");
 }
 
+function formatServiceDoctor(result: Awaited<ReturnType<typeof runServiceDoctor>>): string {
+  return [
+    `Instance: ${result.instanceName}`,
+    `Healthy: ${result.healthy ? "yes" : "no"}`,
+    ...result.checks.map((check) => `- ${check.ok ? "ok" : "fail"} ${check.name}: ${check.detail}`),
+  ].join("\n");
+}
+
 async function runServiceCommand(
   argv: string[],
   env: InstanceTokenEnv,
@@ -355,14 +419,14 @@ async function runServiceCommand(
   serviceDeps: ServiceCommandDeps,
 ): Promise<boolean> {
   if (argv.length < 2) {
-    throw new Error("Usage: telegram service <start|stop|restart|status|logs> ...");
+    throw new Error("Usage: telegram service <start|stop|restart|status|logs|doctor> ...");
   }
 
   const subcommand = argv[1];
   const { instanceName, args } = extractInstanceOption(argv.slice(2));
 
-  if (args.length !== 0) {
-    throw new Error("Usage: telegram service <start|stop|status> [--instance <name>]");
+  if (subcommand !== "logs" && args.length !== 0) {
+    throw new Error("Usage: telegram service <start|stop|restart|status|logs|doctor> [--instance <name>]");
   }
 
   if (subcommand === "start") {
@@ -387,11 +451,87 @@ async function runServiceCommand(
   }
 
   if (subcommand === "logs") {
-    logger.log(await getServiceLogs(env, instanceName, serviceDeps));
+    if (args.length > 1) {
+      throw new Error("Usage: telegram service logs [--instance <name>] [tail-count]");
+    }
+
+    const maxLines = args.length === 1 ? parsePositiveInteger(args[0], "tail count") : 40;
+    logger.log(await getServiceLogs(env, instanceName, serviceDeps, maxLines));
     return true;
   }
 
-  throw new Error("Usage: telegram service <start|stop|restart|status|logs> ...");
+  if (subcommand === "doctor") {
+    logger.log(formatServiceDoctor(await runServiceDoctor(env, instanceName, serviceDeps)));
+    return true;
+  }
+
+  throw new Error("Usage: telegram service <start|stop|restart|status|logs|doctor> ...");
+}
+
+function resolveAgentMdPath(
+  env: Pick<EnvSource, "USERPROFILE" | "CODEX_TELEGRAM_STATE_DIR">,
+  instanceName: string,
+): string {
+  const stateDir = resolveInstanceStateDir({
+    USERPROFILE: env.USERPROFILE,
+    CODEX_TELEGRAM_STATE_DIR: env.CODEX_TELEGRAM_STATE_DIR,
+    CODEX_TELEGRAM_INSTANCE: instanceName,
+  });
+  return path.join(stateDir, "agent.md");
+}
+
+async function runInstructionsCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+): Promise<boolean> {
+  if (argv.length < 2) {
+    throw new Error("Usage: telegram instructions <show|set|path> [--instance <name>] [file-path]");
+  }
+
+  const subcommand = argv[1];
+  const { instanceName, args } = extractInstanceOption(argv.slice(2));
+  const agentMdPath = resolveAgentMdPath(env, instanceName);
+
+  if (subcommand === "path") {
+    logger.log(agentMdPath);
+    return true;
+  }
+
+  if (subcommand === "show") {
+    try {
+      const content = await readFile(agentMdPath, "utf8");
+      const trimmed = content.trim();
+      if (!trimmed) {
+        logger.log(`Instance "${instanceName}": no instructions configured (agent.md is empty).`);
+      } else {
+        logger.log(`Instance "${instanceName}" instructions:\n---\n${trimmed}\n---`);
+      }
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+        logger.log(`Instance "${instanceName}": no instructions configured (agent.md not found).`);
+        logger.log(`Create one at: ${agentMdPath}`);
+      } else {
+        throw error;
+      }
+    }
+    return true;
+  }
+
+  if (subcommand === "set") {
+    if (args.length !== 1) {
+      throw new Error("Usage: telegram instructions set [--instance <name>] <file-path>");
+    }
+
+    const sourcePath = args[0];
+    const content = await readFile(sourcePath, "utf8");
+    await mkdir(path.dirname(agentMdPath), { recursive: true });
+    await writeFile(agentMdPath, content, "utf8");
+    logger.log(`Wrote instructions for instance "${instanceName}" (${content.length} bytes) to ${agentMdPath}`);
+    return true;
+  }
+
+  throw new Error("Usage: telegram instructions <show|set|path> [--instance <name>] [file-path]");
 }
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<boolean> {
@@ -425,6 +565,10 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   if (normalized[0] === "audit") {
     return runAuditCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "instructions") {
+    return runInstructionsCommand(normalized, env, logger);
   }
 
   return false;

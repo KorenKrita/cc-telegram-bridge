@@ -7,8 +7,10 @@ import { resolveInstanceStateDir, type EnvSource } from "../config.js";
 import { normalizeInstanceName } from "../instance.js";
 import { resolveInstanceLockPath, type InstanceLockRecord } from "../state/instance-lock.js";
 import { AccessStore } from "../state/access-store.js";
+import { parseAuditEvents, resolveAuditLogPath, summarizeAuditEvents, type AuditSummary } from "../state/audit-log.js";
 import { TelegramApi } from "../telegram/api.js";
 import { getLastHandledUpdateId, lookupTelegramBotIdentity, readConfiguredBotToken } from "../service.js";
+import { listSessions } from "./session.js";
 
 export interface ServiceCommandEnv
   extends Pick<EnvSource, "USERPROFILE" | "CODEX_TELEGRAM_STATE_DIR" | "TELEGRAM_BOT_TOKEN"> {}
@@ -46,6 +48,7 @@ export interface ServiceStatus {
   pairedUsers: number;
   allowlistCount: number;
   pendingPairs: number;
+  sessionBindings: number;
   lastHandledUpdateId: number | null;
   botTokenConfigured: boolean;
   botIdentity?: {
@@ -54,6 +57,19 @@ export interface ServiceStatus {
   };
   botIdentityWarning?: string;
   lastErrorLine?: string;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  auditEvents: number;
+}
+
+export interface ServiceDoctorResult {
+  instanceName: string;
+  healthy: boolean;
+  checks: Array<{
+    name: string;
+    ok: boolean;
+    detail: string;
+  }>;
 }
 
 function defaultIsProcessAlive(pid: number): boolean {
@@ -346,6 +362,7 @@ export async function getServiceStatus(
   }
   const accessStore = new AccessStore(path.join(paths.stateDir, "access.json"));
   const accessStatus = await accessStore.getStatus();
+  const sessionBindings = (await listSessions(env, paths.instanceName)).length;
   const lastHandledUpdateId = await getLastHandledUpdateId(path.join(paths.stateDir, "inbox"));
   const readToken = deps.readConfiguredBotToken ?? readConfiguredBotToken;
   const fetchIdentity =
@@ -368,6 +385,20 @@ export async function getServiceStatus(
   }
 
   const lastErrorLine = await readLastNonEmptyLine(paths.stderrPath);
+  let auditSummary: AuditSummary = { totalEvents: 0 };
+  try {
+    const rawAudit = await readFile(resolveAuditLogPath(paths.stateDir), "utf8");
+    auditSummary = summarizeAuditEvents(parseAuditEvents(rawAudit));
+  } catch (error) {
+    if (
+      typeof error !== "object" ||
+      error === null ||
+      !("code" in error) ||
+      (error as NodeJS.ErrnoException).code !== "ENOENT"
+    ) {
+      throw error;
+    }
+  }
 
   return {
     instanceName: paths.instanceName,
@@ -381,11 +412,72 @@ export async function getServiceStatus(
     pairedUsers: accessStatus.pairedUsers,
     allowlistCount: accessStatus.allowlist.length,
     pendingPairs: accessStatus.pendingPairs.length,
+    sessionBindings,
     lastHandledUpdateId,
     botTokenConfigured: botToken !== null,
     botIdentity,
     botIdentityWarning,
     lastErrorLine,
+    lastSuccessAt: auditSummary.lastSuccessAt,
+    lastFailureAt: auditSummary.lastErrorAt,
+    auditEvents: auditSummary.totalEvents,
+  };
+}
+
+export async function runServiceDoctor(
+  env: ServiceCommandEnv,
+  instanceName: string,
+  deps: ServiceCommandDeps = {},
+): Promise<ServiceDoctorResult> {
+  const cwd = deps.cwd ?? process.cwd();
+  const paths = resolveServicePaths(env, instanceName, cwd);
+  const status = await getServiceStatus(env, instanceName, deps);
+  const checks: ServiceDoctorResult["checks"] = [];
+
+  checks.push({
+    name: "build",
+    ok: existsSync(paths.entryPath),
+    detail: existsSync(paths.entryPath) ? `Entrypoint found at ${paths.entryPath}` : `Missing entrypoint at ${paths.entryPath}`,
+  });
+  checks.push({
+    name: "token",
+    ok: status.botTokenConfigured,
+    detail: status.botTokenConfigured ? "Bot token is configured." : "Bot token is missing.",
+  });
+  checks.push({
+    name: "service",
+    ok: status.running,
+    detail: status.running ? `Instance is running with pid ${status.pid}.` : "Instance is not running.",
+  });
+  checks.push({
+    name: "identity",
+    ok: status.botTokenConfigured && !status.botIdentityWarning,
+    detail:
+      status.botIdentityWarning ??
+      (status.botIdentity
+        ? `Bot identity resolved as ${status.botIdentity.firstName}${status.botIdentity.username ? ` (@${status.botIdentity.username})` : ""}.`
+        : "Bot identity not available."),
+  });
+  checks.push({
+    name: "sessions",
+    ok: true,
+    detail: `Session bindings: ${status.sessionBindings}.`,
+  });
+  checks.push({
+    name: "audit",
+    ok: true,
+    detail: `Audit events: ${status.auditEvents}. Last success: ${status.lastSuccessAt ?? "none"}. Last failure: ${status.lastFailureAt ?? "none"}.`,
+  });
+  checks.push({
+    name: "stderr",
+    ok: !status.lastErrorLine,
+    detail: status.lastErrorLine ? `Last stderr line: ${status.lastErrorLine}` : "No stderr output recorded.",
+  });
+
+  return {
+    instanceName: status.instanceName,
+    healthy: checks.every((check) => check.ok),
+    checks,
   };
 }
 
@@ -393,6 +485,7 @@ export async function getServiceLogs(
   env: ServiceCommandEnv,
   instanceName: string,
   deps: ServiceCommandDeps = {},
+  maxLines = 40,
 ): Promise<string> {
   const cwd = deps.cwd ?? process.cwd();
   const paths = resolveServicePaths(env, instanceName, cwd);
@@ -430,8 +523,8 @@ export async function getServiceLogs(
   return [
     `Instance: ${normalizeInstanceName(instanceName)}`,
     "--- stdout ---",
-    tailLines(stdout) || "(empty)",
+    tailLines(stdout, maxLines) || "(empty)",
     "--- stderr ---",
-    tailLines(stderr) || "(empty)",
+    tailLines(stderr, maxLines) || "(empty)",
   ].join("\n");
 }

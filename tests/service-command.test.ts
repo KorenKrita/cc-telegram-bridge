@@ -93,6 +93,10 @@ describe("telegram service commands", () => {
       expect(messages[0]).toContain("Pid: 12345");
       expect(messages[0]).toContain("Allowlist count: 0");
       expect(messages[0]).toContain("Pending pair count: 0");
+      expect(messages[0]).toContain("Session bindings: 0");
+      expect(messages[0]).toContain("Audit events: 0");
+      expect(messages[0]).toContain("Last success: none");
+      expect(messages[0]).toContain("Last failure: none");
       expect(messages[0]).toContain("Lock path:");
       expect(messages[0]).toContain("Bot token configured: no");
       expect(messages[0]).not.toContain("Bot identity:");
@@ -163,24 +167,77 @@ describe("telegram service commands", () => {
     const messages: string[] = [];
 
     try {
-      const handled = await runCli(["telegram", "service", "logs", "--instance", "alpha"], {
+      const handled = await runCli(["telegram", "service", "logs", "--instance", "alpha", "2"], {
         env: { USERPROFILE: tempDir },
         logger: { log: (message) => messages.push(message) },
         serviceDeps: {
           cwd: tempDir,
           readTextFile: async (filePath: string) =>
-            filePath.endsWith("stdout.log")
-              ? "line-1\nline-2\nline-3\n"
-              : "err-1\nerr-2\n",
+            filePath.endsWith("stdout.log") ? "line-1\nline-2\nline-3\n" : "err-1\nerr-2\nerr-3\n",
         },
       });
 
       expect(handled).toBe(true);
       expect(messages[0]).toContain("Instance: alpha");
       expect(messages[0]).toContain("--- stdout ---");
+      expect(messages[0]).not.toContain("line-1");
+      expect(messages[0]).toContain("line-2");
       expect(messages[0]).toContain("line-3");
       expect(messages[0]).toContain("--- stderr ---");
+      expect(messages[0]).not.toContain("err-1");
       expect(messages[0]).toContain("err-2");
+      expect(messages[0]).toContain("err-3");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs service doctor with a health summary", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+    const stateDir = path.join(tempDir, ".codex", "channels", "telegram", "alpha");
+    const envPath = path.join(stateDir, ".env");
+    const lockPath = resolveInstanceLockPath(stateDir);
+
+    try {
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(envPath, 'TELEGRAM_BOT_TOKEN="secret-token"\n', "utf8");
+      await writeFile(
+        lockPath,
+        JSON.stringify({
+          pid: 12345,
+          token: "token",
+          acquiredAt: new Date().toISOString(),
+        }),
+      );
+      await writeFile(
+        path.join(stateDir, "audit.log.jsonl"),
+        [
+          '{"timestamp":"2026-04-08T10:00:00.000Z","type":"update.handle","outcome":"success"}',
+          '{"timestamp":"2026-04-08T10:01:00.000Z","type":"update.handle","outcome":"error"}',
+        ].join("\n") + "\n",
+        "utf8",
+      );
+
+      const handled = await runCli(["telegram", "service", "doctor", "--instance", "alpha"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+        serviceDeps: {
+          cwd: REPO_ROOT,
+          isProcessAlive: (pid) => pid === 12345,
+          isExpectedServiceProcess: (pid) => pid === 12345,
+          fetchTelegramBotIdentity: async () => ({ firstName: "Channel Bot", username: "channel_bot" }),
+        },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages[0]).toContain("Instance: alpha");
+      expect(messages[0]).toContain("Healthy: yes");
+      expect(messages[0]).toContain("ok build:");
+      expect(messages[0]).toContain("ok token:");
+      expect(messages[0]).toContain("ok service:");
+      expect(messages[0]).toContain("ok identity:");
+      expect(messages[0]).toContain("ok audit:");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

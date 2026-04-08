@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 
 import type {
   CodexAdapter,
@@ -110,16 +111,22 @@ function buildCommandInvocation(command: string, args: string[]): { command: str
 export class ProcessCodexAdapter implements CodexAdapter {
   private readonly childEnv: NodeJS.ProcessEnv;
   private readonly spawnCodex: SpawnCodex;
+  private readonly instructionsPath: string | undefined;
 
   /**
    * First-pass adapter that runs Codex as a process.
    * The returned session id is a logical Telegram binding key for now, not
    * persisted Codex conversation continuity.
+   *
+   * If instructionsPath is provided, the file contents are prepended to every
+   * prompt sent to Codex (loaded fresh on each call so edits take effect
+   * without restarting the service).
    */
   constructor(
     private readonly codexExecutable: string,
     childEnvOrSpawn?: NodeJS.ProcessEnv | SpawnCodex,
     spawnCodexArg?: SpawnCodex,
+    instructionsPath?: string,
   ) {
     this.childEnv =
       typeof childEnvOrSpawn === "function"
@@ -138,14 +145,40 @@ export class ProcessCodexAdapter implements CodexAdapter {
       typeof childEnvOrSpawn === "function"
         ? childEnvOrSpawn
         : spawnCodexArg ?? (spawn as unknown as SpawnCodex);
+
+    this.instructionsPath = instructionsPath;
   }
 
   async createSession(chatId: number): Promise<CodexSessionHandle> {
     return { sessionId: `telegram-${chatId}` };
   }
 
+  private async loadInstructions(): Promise<string | null> {
+    if (!this.instructionsPath) {
+      return null;
+    }
+
+    try {
+      const content = await readFile(this.instructionsPath, "utf8");
+      const trimmed = content.trim();
+      return trimmed || null;
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async sendUserMessage(sessionId: string, input: CodexUserMessageInput): Promise<CodexAdapterResponse> {
-    const prompt = [input.text, ...input.files.map((file) => `Attachment: ${file}`)].join("\n");
+    const instructions = input.instructions ?? (this.instructionsPath ? await this.loadInstructions() : null);
+    const parts: string[] = [];
+    if (instructions) {
+      parts.push(`[System Instructions]\n${instructions}\n[End Instructions]`);
+    }
+    parts.push(input.text);
+    parts.push(...input.files.map((file) => `Attachment: ${file}`));
+    const prompt = parts.join("\n");
     const args = isLogicalTelegramSessionId(sessionId)
       ? ["exec", "--json", prompt]
       : ["exec", "resume", "--json", sessionId, prompt];

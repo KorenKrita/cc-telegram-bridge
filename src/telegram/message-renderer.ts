@@ -13,9 +13,33 @@ export function chunkTelegramMessage(text: string, limit = 4000): string[] {
 }
 
 export function renderWorkingMessage(): string {
-  return "Working...";
+  return "Received. Starting your Codex session...";
 }
 
 export function renderErrorMessage(error: string): string {
   return `Error: ${error}`;
+}
+
+export function renderAccessCheckMessage(): string {
+  return "Checking access policy...";
+}
+
+export function renderAttachmentDownloadMessage(count: number): string {
+  return `Downloading ${count} attachment${count === 1 ? "" : "s"}...`;
+}
+
+export function renderExecutionMessage(): string {
+  return "Running Codex on your request...";
+}
+
+export function renderUnauthorizedMessage(): string {
+  return "This chat is not authorized for this instance.";
+}
+
+export function renderPrivateChatRequiredMessage(): string {
+  return "This bot only accepts private chats.";
+}
+
+export function renderPairingMessage(code: string): string {
+  return `Pair this private chat with code ${code}`;
 }

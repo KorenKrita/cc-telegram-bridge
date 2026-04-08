@@ -232,4 +232,60 @@ describe("runCli", () => {
       await rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("reads the audit tail for an instance", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      const auditPath = path.join(tempDir, ".codex", "channels", "telegram", "default", "audit.log.jsonl");
+      await mkdir(path.dirname(auditPath), { recursive: true });
+      await writeFile(
+        auditPath,
+        ['{"type":"a"}', '{"type":"b"}', '{"type":"c"}'].join("\n") + "\n",
+        "utf8",
+      );
+
+      const handled = await runCli(["telegram", "audit", "2"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages).toEqual(['{"type":"b"}\n{"type":"c"}']);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("filters audit output by chat and outcome", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      const auditPath = path.join(tempDir, ".codex", "channels", "telegram", "default", "audit.log.jsonl");
+      await mkdir(path.dirname(auditPath), { recursive: true });
+      await writeFile(
+        auditPath,
+        [
+          '{"timestamp":"2026-04-08T00:00:00.000Z","type":"update.handle","chatId":1,"outcome":"success"}',
+          '{"timestamp":"2026-04-08T00:01:00.000Z","type":"update.handle","chatId":2,"outcome":"error"}',
+          '{"timestamp":"2026-04-08T00:02:00.000Z","type":"update.handle","chatId":2,"outcome":"success"}',
+        ].join("\n") + "\n",
+        "utf8",
+      );
+
+      const handled = await runCli(["telegram", "audit", "--chat", "2", "--outcome", "error"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages).toEqual([
+        '{"timestamp":"2026-04-08T00:01:00.000Z","type":"update.handle","chatId":2,"outcome":"error"}',
+      ]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });

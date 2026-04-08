@@ -14,6 +14,7 @@ type SpawnOptions = {
   shell?: boolean;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  windowsHide?: boolean;
 };
 
 type ProcessStreamLike = {
@@ -47,6 +48,36 @@ const MAX_INSTRUCTIONS_CHARS = 16_000;
 
 function isLogicalTelegramSessionId(sessionId: string): boolean {
   return sessionId.startsWith("telegram-");
+}
+
+function normalizeExecutableCommand(command: string): string {
+  const trimmed = command.trim();
+
+  if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
+}
+
+function buildCommandInvocation(command: string, args: string[]): { command: string; args: string[]; shell?: boolean } {
+  const normalizedCommand = normalizeExecutableCommand(command);
+
+  if (/\.(cmd|bat)$/i.test(normalizedCommand)) {
+    return {
+      command: process.env.ComSpec ?? "cmd.exe",
+      args: ["/d", "/s", "/c", normalizedCommand, ...args],
+    };
+  }
+
+  if (/\.ps1$/i.test(normalizedCommand)) {
+    return {
+      command: "pwsh",
+      args: ["-NoProfile", "-File", normalizedCommand, ...args],
+    };
+  }
+
+  return { command: normalizedCommand, args, shell: false };
 }
 
 export class ProcessClaudeAdapter implements CodexAdapter {
@@ -190,10 +221,13 @@ export class ProcessClaudeAdapter implements CodexAdapter {
   }
 
   private async runClaudeCommand(args: string[], stdinContent: string): Promise<{ stdout: string; stderr: string }> {
-    const child = this.spawnClaude(this.claudeExecutable, args, {
+    const invocation = buildCommandInvocation(this.claudeExecutable, args);
+    const child = this.spawnClaude(invocation.command, invocation.args, {
       stdio: ["pipe", "pipe", "pipe"],
+      shell: invocation.shell,
       env: this.childEnv,
       cwd: this.workspacePath,
+      windowsHide: true,
     });
 
     return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {

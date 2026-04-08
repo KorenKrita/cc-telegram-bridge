@@ -1,0 +1,169 @@
+import { EventEmitter } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+import { ProcessClaudeAdapter } from "../src/codex/claude-adapter.js";
+
+async function waitForSpawn(calls: Array<unknown>): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    if (calls.length > 0) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  throw new Error("Claude process was not spawned in time");
+}
+
+class FakeStream extends EventEmitter {
+  emitData(chunk: string) {
+    this.emit("data", chunk);
+  }
+}
+
+class FakeWritable {
+  written = "";
+
+  write(chunk: string, callback?: (error?: Error | null) => void): boolean {
+    this.written += chunk;
+    callback?.(null);
+    return true;
+  }
+
+  end(callback?: () => void): void {
+    callback?.();
+  }
+}
+
+class FakeClaudeChildProcess extends EventEmitter {
+  stdin = new FakeWritable();
+  stdout = new FakeStream();
+  stderr = new FakeStream();
+
+  close(code: number | null) {
+    this.emit("close", code);
+  }
+}
+
+function createSpawnHarness() {
+  const child = new FakeClaudeChildProcess();
+  const calls: Array<{
+    command: string;
+    args: string[];
+    options: {
+      stdio: ["pipe", "pipe", "pipe"];
+      shell?: boolean;
+      env?: NodeJS.ProcessEnv;
+      cwd?: string;
+      windowsHide?: boolean;
+    };
+  }> = [];
+
+  const spawnFn = (
+    command: string,
+    args: string[],
+    options: {
+      stdio: ["pipe", "pipe", "pipe"];
+      shell?: boolean;
+      env?: NodeJS.ProcessEnv;
+      cwd?: string;
+      windowsHide?: boolean;
+    },
+  ) => {
+    calls.push({ command, args, options });
+    return child;
+  };
+
+  return { child, calls, spawnFn };
+}
+
+describe("ProcessClaudeAdapter", () => {
+  it("creates a logical telegram session placeholder", async () => {
+    const adapter = new ProcessClaudeAdapter("claude");
+    await expect(adapter.createSession(12345)).resolves.toEqual({
+      sessionId: "telegram-12345",
+    });
+  });
+
+  it("builds a Claude invocation with instructions, workspace, and resume", async () => {
+    const { child, calls, spawnFn } = createSpawnHarness();
+    const root = await mkdtemp(path.join(os.tmpdir(), "cc-telegram-bridge-"));
+    const instructionsPath = path.join(root, "agent.md");
+    const configPath = path.join(root, "config.json");
+    const workspacePath = path.join(root, "workspace");
+
+    try {
+      await writeFile(instructionsPath, "You are a reviewer.", "utf8");
+      await writeFile(configPath, JSON.stringify({ approvalMode: "full-auto" }), "utf8");
+      const adapter = new ProcessClaudeAdapter("claude", {
+        spawnFn,
+        instructionsPath,
+        configPath,
+        workspacePath,
+      });
+
+      const promise = adapter.sendUserMessage("session-123", {
+        text: "Review this",
+        files: ["a.ts"],
+      });
+      await waitForSpawn(calls);
+
+      child.stdout.emitData('{"type":"result","result":"Looks good","session_id":"session-123"}');
+      child.close(0);
+
+      await expect(promise).resolves.toEqual({
+        text: "Looks good",
+        sessionId: "session-123",
+      });
+      expect(calls[0]?.command).toBe("claude");
+      expect(calls[0]?.args).toEqual([
+        "-p",
+        "--output-format",
+        "json",
+        "--system-prompt",
+        "You are a reviewer.",
+        "-r",
+        "session-123",
+        "--permission-mode",
+        "bypassPermissions",
+        "--add-dir",
+        workspacePath,
+      ]);
+      expect(calls[0]?.options.cwd).toBe(workspacePath);
+      expect(calls[0]?.options.windowsHide).toBe(true);
+      expect(child.stdin.written).toBe("Review this\nAttachment: a.ts");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes quoted Windows claude.cmd paths", async () => {
+    const { child, calls, spawnFn } = createSpawnHarness();
+    const adapter = new ProcessClaudeAdapter('"C:\\Users\\hangw\\AppData\\Roaming\\npm\\claude.cmd"', {
+      spawnFn,
+    });
+
+    const promise = adapter.sendUserMessage("telegram-12345", {
+      text: "Hello",
+      files: [],
+    });
+
+    child.stdout.emitData('{"type":"result","result":"ok","session_id":"session-abc"}');
+    child.close(0);
+    await promise;
+
+    expect(calls[0]?.command.toLowerCase()).toContain("cmd");
+    expect(calls[0]?.args.slice(0, 5)).toEqual([
+      "/d",
+      "/s",
+      "/c",
+      "C:\\Users\\hangw\\AppData\\Roaming\\npm\\claude.cmd",
+      "-p",
+    ]);
+    expect(calls[0]?.options.windowsHide).toBe(true);
+  });
+});

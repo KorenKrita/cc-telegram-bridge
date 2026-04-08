@@ -132,13 +132,10 @@ function defaultIsExpectedServiceProcess(pid: number, entryPath: string, instanc
   }
 
   const commandLine = result.stdout.trim().toLowerCase();
-  const instancePatterns = [
-    `--instance ${instanceName.toLowerCase()}`,
-    `--instance=${instanceName.toLowerCase()}`,
-  ];
+  const instancePattern = new RegExp(`(?:^|\\s)--instance(?:=|\\s+)${instanceName.toLowerCase()}(?:\\s|$)`);
   return (
     commandLine.includes("dist/src/index.js") &&
-    instancePatterns.some((pattern) => commandLine.includes(pattern))
+    instancePattern.test(commandLine)
   );
 }
 

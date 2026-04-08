@@ -12,6 +12,7 @@ export interface EnvSource {
   CODEX_TELEGRAM_INSTANCE?: string;
   CODEX_TELEGRAM_STATE_DIR?: string;
   CODEX_EXECUTABLE?: string;
+  CLAUDE_EXECUTABLE?: string;
 }
 
 function resolveHomeDir(env: Pick<EnvSource, "HOME" | "USERPROFILE">): string | undefined {

@@ -338,4 +338,30 @@ describe("runCli", () => {
       await rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("sets and reads the engine for an instance", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      await runCli(["telegram", "engine", "claude", "--instance", "alpha"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+      });
+
+      const handled = await runCli(["telegram", "engine", "--instance", "alpha"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages[0]).toBe('Instance "alpha": engine set to "claude". Restart the service to apply.');
+      expect(messages[1]).toBe('Instance "alpha": engine = claude');
+
+      const configPath = path.join(tempDir, ".codex", "channels", "telegram", "alpha", "config.json");
+      await expect(readFile(configPath, "utf8")).resolves.toContain('"engine": "claude"');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -137,12 +138,14 @@ export async function resolveServiceEnvForInstance(env: EnvSource, instanceName:
     CODEX_TELEGRAM_INSTANCE: string;
     CODEX_TELEGRAM_STATE_DIR?: string;
     CODEX_EXECUTABLE?: string;
+    CLAUDE_EXECUTABLE?: string;
   } = {
     HOME: env.HOME,
     USERPROFILE: env.USERPROFILE,
     CODEX_TELEGRAM_INSTANCE: normalizedInstanceName,
     CODEX_TELEGRAM_STATE_DIR: env.CODEX_TELEGRAM_STATE_DIR,
     CODEX_EXECUTABLE: env.CODEX_EXECUTABLE,
+    CLAUDE_EXECUTABLE: env.CLAUDE_EXECUTABLE,
   };
 
   const telegramBotToken = await readConfiguredBotToken(
@@ -180,11 +183,34 @@ async function readInstanceEngine(configPath: string): Promise<EngineType> {
   }
 }
 
-function resolveClaudeExecutable(): string {
+function resolveClaudeExecutable(env: EnvSource): string {
+  if (env.CLAUDE_EXECUTABLE) {
+    return env.CLAUDE_EXECUTABLE;
+  }
+
+  if (process.platform === "win32") {
+    const appData =
+      env.APPDATA ??
+      (env.USERPROFILE ? path.join(env.USERPROFILE, "AppData", "Roaming") : undefined);
+
+    if (appData) {
+      const windowsClaudeCmd = path.join(appData, "npm", "claude.cmd");
+      if (existsSync(windowsClaudeCmd)) {
+        return windowsClaudeCmd;
+      }
+
+      const windowsClaudeShim = path.join(appData, "npm", "claude.ps1");
+      if (existsSync(windowsClaudeShim)) {
+        return windowsClaudeShim;
+      }
+    }
+  }
+
   return "claude";
 }
 
 async function createAdapter(
+  env: EnvSource,
   config: ReturnType<typeof resolveConfig>,
   instructionsPath: string,
   configPath: string,
@@ -194,7 +220,7 @@ async function createAdapter(
 
   if (engine === "claude") {
     await mkdir(workspacePath, { recursive: true });
-    return new ProcessClaudeAdapter(resolveClaudeExecutable(), {
+    return new ProcessClaudeAdapter(resolveClaudeExecutable(env), {
       instructionsPath,
       configPath,
       workspacePath,
@@ -211,7 +237,7 @@ export async function createServiceDependencies(env: EnvSource): Promise<{ confi
   const sessionStore = new SessionStore(config.sessionStatePath);
   const instructionsPath = path.join(config.stateDir, "agent.md");
   const configPath = path.join(config.stateDir, "config.json");
-  const adapter = await createAdapter(config, instructionsPath, configPath);
+  const adapter = await createAdapter(env, config, instructionsPath, configPath);
   const sessionManager = new SessionManager(sessionStore, adapter);
   const bridge = new Bridge(accessStore, sessionManager, adapter);
 
@@ -427,12 +453,13 @@ export async function pollTelegramUpdates(
   const maxBackoffMs = 60000;
 
   while (!signal?.aborted) {
+    const previousOffset = offset;
     const result = await pollTelegramUpdatesOnce(api, bridge, inboxDir, logger, offset, signal);
     offset = result.offset;
 
     if (result.hadFetchError) {
       backoffMs = Math.min(backoffMs * 2, maxBackoffMs);
-    } else if (result.hadUpdates && result.offset !== offset) {
+    } else if (result.hadUpdates && result.offset !== previousOffset) {
       // Got messages — poll again immediately for low latency
       backoffMs = 0;
     } else {

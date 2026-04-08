@@ -20,9 +20,11 @@ async function main(): Promise<void> {
     const resolvedEnv = await resolveServiceEnvForInstance(
       {
         HOME: process.env.HOME,
+        APPDATA: process.env.APPDATA,
         USERPROFILE: process.env.USERPROFILE,
         CODEX_TELEGRAM_STATE_DIR: process.env.CODEX_TELEGRAM_STATE_DIR,
         CODEX_EXECUTABLE: process.env.CODEX_EXECUTABLE,
+        CLAUDE_EXECUTABLE: process.env.CLAUDE_EXECUTABLE,
         TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
       },
       instanceName,

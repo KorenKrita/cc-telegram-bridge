@@ -9,7 +9,7 @@ export interface EnvSource {
   CODEX_EXECUTABLE?: string;
 }
 
-export function resolveConfig(env: EnvSource): AppConfig {
+export function resolveConfig(env: EnvSource = process.env): AppConfig {
   const userProfile = env.USERPROFILE;
   if (!userProfile) {
     throw new Error("USERPROFILE is required");

@@ -3,16 +3,18 @@ import { randomInt } from "node:crypto";
 import { JsonStore } from "./json-store.js";
 import type { AccessState, PairedUser, PendingPair } from "../types.js";
 
-export const DEFAULT_ACCESS_STATE: AccessState = {
-  policy: "pairing",
-  pairedUsers: [],
-  allowlist: [],
-  pendingPairs: [],
-};
-
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_LENGTH = 6;
 const PAIRING_TTL_MS = 5 * 60 * 1000;
+
+function createDefaultAccessState(): AccessState {
+  return {
+    policy: "pairing",
+    pairedUsers: [],
+    allowlist: [],
+    pendingPairs: [],
+  };
+}
 
 function generateCode(): string {
   let code = "";
@@ -24,6 +26,37 @@ function generateCode(): string {
   return code;
 }
 
+function isPairedUser(value: unknown): value is PairedUser {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as Partial<PairedUser>;
+  return (
+    typeof candidate.telegramUserId === "number" &&
+    typeof candidate.telegramChatId === "number" &&
+    typeof candidate.pairedAt === "string"
+  );
+}
+
+function isPendingPair(value: unknown): value is PendingPair {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as Partial<PendingPair>;
+  return (
+    typeof candidate.code === "string" &&
+    typeof candidate.telegramUserId === "number" &&
+    typeof candidate.telegramChatId === "number" &&
+    typeof candidate.expiresAt === "string"
+  );
+}
+
+function isNumberArray(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "number");
+}
+
 function isAccessState(value: unknown): value is AccessState {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -33,8 +66,10 @@ function isAccessState(value: unknown): value is AccessState {
   return (
     (candidate.policy === "pairing" || candidate.policy === "allowlist") &&
     Array.isArray(candidate.pairedUsers) &&
-    Array.isArray(candidate.allowlist) &&
-    Array.isArray(candidate.pendingPairs)
+    candidate.pairedUsers.every(isPairedUser) &&
+    isNumberArray(candidate.allowlist) &&
+    Array.isArray(candidate.pendingPairs) &&
+    candidate.pendingPairs.every(isPendingPair)
   );
 }
 
@@ -52,7 +87,7 @@ export class AccessStore {
   }
 
   async load(): Promise<AccessState> {
-    return this.store.read(DEFAULT_ACCESS_STATE);
+    return this.store.read(createDefaultAccessState());
   }
 
   async issuePairingCode({
@@ -65,14 +100,22 @@ export class AccessStore {
     now: Date;
   }): Promise<PendingPair> {
     const state = await this.load();
+
+    state.pendingPairs = state.pendingPairs.filter((pair) => pair.telegramUserId !== telegramUserId);
+    const pendingCodes = new Set(state.pendingPairs.map((pair) => pair.code));
+
+    let code = generateCode();
+    while (pendingCodes.has(code)) {
+      code = generateCode();
+    }
+
     const pendingPair: PendingPair = {
-      code: generateCode(),
+      code,
       telegramUserId,
       telegramChatId,
       expiresAt: new Date(now.getTime() + PAIRING_TTL_MS).toISOString(),
     };
 
-    state.pendingPairs = state.pendingPairs.filter((pair) => pair.telegramUserId !== telegramUserId);
     state.pendingPairs.push(pendingPair);
 
     await this.store.write(state);
@@ -100,6 +143,10 @@ export class AccessStore {
       pairedAt: now.toISOString(),
     };
 
+    state.pairedUsers = state.pairedUsers.filter(
+      (user) =>
+        user.telegramUserId !== pairedUser.telegramUserId || user.telegramChatId !== pairedUser.telegramChatId,
+    );
     state.pairedUsers.push(pairedUser);
     state.allowlist = [...new Set([...state.allowlist, pendingPair.telegramChatId])];
 

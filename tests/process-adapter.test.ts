@@ -64,6 +64,38 @@ describe("ProcessCodexAdapter", () => {
     expect(calls[0]?.options.env?.TELEGRAM_BOT_TOKEN).toBeUndefined();
   });
 
+  it("normalizes quoted Windows codex.cmd paths before invoking cmd.exe", async () => {
+    const calls: Array<{
+      command: string;
+      args: string[];
+      options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv };
+    }> = [];
+    const child = new FakeChildProcess();
+    const spawnCodex = (
+      command: string,
+      args: string[],
+      options: { stdio: ["ignore", "pipe", "pipe"]; shell?: boolean; env?: NodeJS.ProcessEnv },
+    ) => {
+      calls.push({ command, args, options });
+      return child;
+    };
+
+    const adapter = new ProcessCodexAdapter('"C:\\Users\\hangw\\AppData\\Roaming\\npm\\codex.cmd"', spawnCodex);
+    const promise = adapter.sendUserMessage("telegram-12345", {
+      text: "Hello",
+      files: [],
+    });
+
+    child.stdout.emitData('{"type":"thread.started","thread_id":"thread-123"}\n');
+    child.stdout.emitData('{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}\n');
+    child.close(0);
+    await promise;
+
+    expect(calls[0]?.command.toLowerCase()).toContain("cmd");
+    expect(calls[0]?.args[3]).toContain('"C:\\Users\\hangw\\AppData\\Roaming\\npm\\codex.cmd"');
+    expect(calls[0]?.args[3]).not.toContain('"\\"C:\\Users\\hangw\\AppData\\Roaming\\npm\\codex.cmd\\""');
+  });
+
   it("returns trimmed stdout when codex exits successfully", async () => {
     const { spawnCodex, child } = createSpawnHarness();
     const adapter = new ProcessCodexAdapter("codex", spawnCodex);

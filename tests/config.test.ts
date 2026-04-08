@@ -46,6 +46,16 @@ describe("resolveConfig", () => {
     expect(config.codexExecutable).toBe("codex.exe");
   });
 
+  it("strips wrapping quotes from executable overrides", () => {
+    const config = resolveConfig({
+      TELEGRAM_BOT_TOKEN: "abc123",
+      CODEX_TELEGRAM_STATE_DIR: "C:/custom/state",
+      CODEX_EXECUTABLE: '"C:\\Users\\hangw\\AppData\\Roaming\\npm\\codex.cmd"',
+    });
+
+    expect(config.codexExecutable).toBe("C:\\Users\\hangw\\AppData\\Roaming\\npm\\codex.cmd");
+  });
+
   it("uses the named instance directory when CODEX_TELEGRAM_INSTANCE is set", () => {
     const config = resolveConfig({
       USERPROFILE: "C:\\Users\\hangw",

@@ -90,23 +90,35 @@ function isLogicalTelegramSessionId(sessionId: string): boolean {
   return sessionId.startsWith("telegram-");
 }
 
+function normalizeExecutableCommand(command: string): string {
+  const trimmed = command.trim();
+
+  if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
+}
+
 function buildCommandInvocation(command: string, args: string[]): { command: string; args: string[]; shell?: boolean } {
-  if (/\.(cmd|bat)$/i.test(command)) {
-    const escaped = [command, ...args].map((part) => `"${part.replace(/"/g, '\\"')}"`).join(" ");
+  const normalizedCommand = normalizeExecutableCommand(command);
+
+  if (/\.(cmd|bat)$/i.test(normalizedCommand)) {
+    const escaped = [normalizedCommand, ...args].map((part) => `"${part.replace(/"/g, '\\"')}"`).join(" ");
     return {
       command: process.env.ComSpec ?? "cmd.exe",
       args: ["/d", "/s", "/c", escaped],
     };
   }
 
-  if (/\.ps1$/i.test(command)) {
+  if (/\.ps1$/i.test(normalizedCommand)) {
     return {
       command: "pwsh",
-      args: ["-NoProfile", "-File", command, ...args],
+      args: ["-NoProfile", "-File", normalizedCommand, ...args],
     };
   }
 
-  return { command, args, shell: false };
+  return { command: normalizedCommand, args, shell: false };
 }
 
 export type ApprovalMode = "normal" | "full-auto" | "bypass";

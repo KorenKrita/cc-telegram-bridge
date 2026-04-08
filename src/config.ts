@@ -13,9 +13,19 @@ export interface EnvSource {
   CODEX_EXECUTABLE?: string;
 }
 
+function normalizeExecutablePath(value: string): string {
+  const trimmed = value.trim();
+
+  if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
+}
+
 function resolveDefaultCodexExecutable(env: EnvSource): string {
   if (env.CODEX_EXECUTABLE) {
-    return env.CODEX_EXECUTABLE;
+    return normalizeExecutablePath(env.CODEX_EXECUTABLE);
   }
 
   const appData =

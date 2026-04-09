@@ -237,6 +237,25 @@ export class ProcessClaudeAdapter implements CodexAdapter {
     return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
       let stdout = "";
       let stderr = "";
+      let settled = false;
+
+      const resolveOnce = (value: { stdout: string; stderr: string }) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        resolve(value);
+      };
+
+      const rejectOnce = (error: Error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        reject(error);
+      };
 
       child.stdout?.on("data", (chunk) => {
         stdout += chunk.toString();
@@ -246,14 +265,16 @@ export class ProcessClaudeAdapter implements CodexAdapter {
         stderr += chunk.toString();
       });
 
-      child.once("error", reject);
+      child.once("error", (error) => {
+        rejectOnce(error);
+      });
       child.once("close", (code) => {
         if (code === 0) {
-          resolve({ stdout, stderr });
+          resolveOnce({ stdout, stderr });
           return;
         }
 
-        reject(new Error(stderr.trim() || `claude exited with code ${code}`));
+        rejectOnce(new Error(stderr.trim() || `claude exited with code ${code}`));
       });
 
       // Write prompt to stdin

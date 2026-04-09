@@ -35,6 +35,7 @@ type AppServerChildProcess = {
 };
 
 type SpawnCodex = (command: string, args: string[], options: SpawnOptions) => AppServerChildProcess;
+const MAX_INSTRUCTIONS_CHARS = 16_000;
 
 type JsonRpcResponse = {
   id?: number;
@@ -168,7 +169,15 @@ export class CodexAppServerAdapter implements CodexAdapter {
     try {
       const content = await readFile(this.instructionsPath, "utf8");
       const trimmed = content.trim();
-      return trimmed || null;
+      if (!trimmed) {
+        return null;
+      }
+
+      if (trimmed.length <= MAX_INSTRUCTIONS_CHARS) {
+        return trimmed;
+      }
+
+      return `${trimmed.slice(0, MAX_INSTRUCTIONS_CHARS)}\n\n[Instructions truncated at ${MAX_INSTRUCTIONS_CHARS} characters]`;
     } catch {
       return null;
     }
@@ -379,21 +388,56 @@ export class CodexAppServerAdapter implements CodexAdapter {
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {
-    if (!this.child?.stdin) {
+    const child = this.child;
+    const stdin = child?.stdin;
+
+    if (!stdin) {
       return Promise.reject(new Error("codex app-server is not running"));
     }
 
     const id = this.nextRequestId++;
     return new Promise<unknown>((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
-      this.child!.stdin!.write(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id,
-          method,
-          params,
-        }) + "\n",
-      );
+      let settled = false;
+      const resolveOnce = (value: unknown) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        resolve(value);
+      };
+      const rejectOnce = (error: Error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        this.pendingRequests.delete(id);
+        reject(error);
+      };
+
+      this.pendingRequests.set(id, {
+        resolve: resolveOnce,
+        reject: rejectOnce,
+      });
+
+      try {
+        stdin.write(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            method,
+            params,
+          }) + "\n",
+          (error) => {
+            if (error) {
+              rejectOnce(error);
+            }
+          },
+        );
+      } catch (error) {
+        rejectOnce(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 

@@ -166,4 +166,33 @@ describe("ProcessClaudeAdapter", () => {
     ]);
     expect(calls[0]?.options.windowsHide).toBe(true);
   });
+
+  it("does not trigger multiple promise settlements when error is followed by close", async () => {
+    const { child, spawnFn } = createSpawnHarness();
+    const adapter = new ProcessClaudeAdapter("claude", {
+      spawnFn,
+    });
+    let multipleResolve: { type: string } | null = null;
+    const handler = (type: string) => {
+      multipleResolve = { type };
+    };
+
+    process.once("multipleResolves", handler);
+
+    try {
+      const promise = adapter.sendUserMessage("telegram-12345", {
+        text: "Hello",
+        files: [],
+      });
+
+      child.emit("error", new Error("boom"));
+      child.close(1);
+
+      await expect(promise).rejects.toThrow("boom");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(multipleResolve).toBeNull();
+    } finally {
+      process.removeListener("multipleResolves", handler);
+    }
+  });
 });

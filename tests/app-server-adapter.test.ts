@@ -27,13 +27,16 @@ class FakeStream extends EventEmitter {
 
 class FakeWritable {
   lines: string[] = [];
+  nextError: Error | null = null;
 
   write(chunk: string, callback?: (error?: Error | null) => void): boolean {
     const text = chunk.toString().trim();
     if (text) {
       this.lines.push(text);
     }
-    callback?.(null);
+    const error = this.nextError;
+    this.nextError = null;
+    callback?.(error);
     return true;
   }
 }
@@ -169,6 +172,67 @@ describe("CodexAppServerAdapter", () => {
       expect(threadRead.method).toBe("thread/read");
       child.stdout.emitData('{"id":4,"result":{"thread":{"turns":[{"id":"turn-1","items":[{"type":"agentMessage","text":"READY isolated"}]}]}}}\n');
       await promise;
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("truncates oversized instructions and degrades safely on read failure", async () => {
+    const { child, spawnFn } = createSpawnHarness();
+    const root = await mkdtemp(path.join(os.tmpdir(), "cc-telegram-bridge-"));
+    const instructionsPath = path.join(root, "agent.md");
+
+    try {
+      await writeFile(instructionsPath, "x".repeat(20_000), "utf8");
+      const adapter = new CodexAppServerAdapter(
+        "codex",
+        process.cwd(),
+        undefined,
+        spawnFn,
+        instructionsPath,
+      );
+
+      const promise = adapter.sendUserMessage("telegram-12345", {
+        text: "Hello",
+        files: [],
+      });
+
+      await waitFor(() => child.stdin.lines.length >= 1);
+      child.stdout.emitData('{"id":1,"result":{"platformOs":"windows"}}\n');
+      await waitFor(() => child.stdin.lines.length >= 2);
+      child.stdout.emitData('{"id":2,"result":{"thread":{"id":"thread-123"}}}\n');
+      await waitFor(() => child.stdin.lines.length >= 3);
+
+      const turnStart = JSON.parse(child.stdin.lines[2] ?? "{}");
+      expect(turnStart.params.input[0].text).toContain("[Instructions truncated at 16000 characters]");
+      expect(turnStart.params.input[0].text.length).toBeLessThan(17_000);
+
+      child.stdout.emitData('{"method":"item/completed","params":{"threadId":"thread-123","item":{"type":"agentMessage","text":"ok"}}}\n');
+      child.stdout.emitData('{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-1","items":[],"status":"completed","error":null}}}\n');
+      await promise;
+
+      const secondHarness = createSpawnHarness();
+      const second = new CodexAppServerAdapter(
+        "codex",
+        process.cwd(),
+        undefined,
+        secondHarness.spawnFn,
+        path.join(root, "missing.md"),
+      );
+      const secondPromise = second.sendUserMessage("telegram-67890", {
+        text: "Hello again",
+        files: [],
+      });
+      await waitFor(() => secondHarness.child.stdin.lines.length >= 1);
+      secondHarness.child.stdout.emitData('{"id":1,"result":{"platformOs":"windows"}}\n');
+      await waitFor(() => secondHarness.child.stdin.lines.length >= 2);
+      secondHarness.child.stdout.emitData('{"id":2,"result":{"thread":{"id":"thread-456"}}}\n');
+      await waitFor(() => secondHarness.child.stdin.lines.length >= 3);
+      const secondTurnStart = JSON.parse(secondHarness.child.stdin.lines[2] ?? "{}");
+      expect(secondTurnStart.params.input[0].text).toBe("Hello again");
+      secondHarness.child.stdout.emitData('{"method":"item/completed","params":{"threadId":"thread-456","item":{"type":"agentMessage","text":"ok"}}}\n');
+      secondHarness.child.stdout.emitData('{"method":"turn/completed","params":{"threadId":"thread-456","turn":{"id":"turn-2","items":[],"status":"completed","error":null}}}\n');
+      await secondPromise;
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -311,5 +375,18 @@ describe("CodexAppServerAdapter", () => {
     child.stdout.emitData('{"id":4,"result":{"thread":{"turns":[{"id":"turn-1","items":[{"type":"userMessage","content":[{"type":"text","text":"Hello"}]}],"status":"failed","error":{"message":"unexpected status 401 Unauthorized","additionalDetails":null}}]}}}\n');
 
     await expect(promise).rejects.toThrow("unexpected status 401 Unauthorized");
+  });
+
+  it("rejects when app-server stdin write fails", async () => {
+    const { child, spawnFn } = createSpawnHarness();
+    child.stdin.nextError = new Error("pipe broken");
+    const adapter = new CodexAppServerAdapter("codex", process.cwd(), spawnFn);
+
+    await expect(
+      adapter.sendUserMessage("telegram-12345", {
+        text: "Hello",
+        files: [],
+      }),
+    ).rejects.toThrow("pipe broken");
   });
 });

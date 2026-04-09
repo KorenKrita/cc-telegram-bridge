@@ -748,6 +748,7 @@ Commands:
   engine [codex|claude] [--instance <name>]   Switch AI engine per instance
   usage [--instance <name>]                   Show token usage and cost
   verbosity [0|1|2] [--instance <name>]       Set progress output level
+  dashboard                                   Open a visual status dashboard in the browser
   help                                        Show this help message`;
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<boolean> {
@@ -806,6 +807,13 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   if (normalized[0] === "verbosity") {
     return runVerbosityCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "dashboard") {
+    const { generateDashboard } = await import("./dashboard.js");
+    const outPath = await generateDashboard(env);
+    logger.log(`Dashboard generated: ${outPath}`);
+    return true;
   }
 
   return false;

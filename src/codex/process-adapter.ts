@@ -178,6 +178,11 @@ function buildCommandInvocation(command: string, args: string[]): { command: str
 
 export type ApprovalMode = "normal" | "full-auto" | "bypass";
 
+function combineInstructions(primary: string | null, secondary: string | null): string | null {
+  const parts = [primary?.trim(), secondary?.trim()].filter((value): value is string => Boolean(value));
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
 export class ProcessCodexAdapter implements CodexAdapter {
   private readonly childEnv: NodeJS.ProcessEnv;
   private readonly spawnCodex: SpawnCodex;
@@ -281,10 +286,14 @@ export class ProcessCodexAdapter implements CodexAdapter {
   }
 
   async sendUserMessage(sessionId: string, input: CodexUserMessageInput): Promise<CodexAdapterResponse> {
-    const instructions = input.instructions ?? (this.instructionsPath ? await this.loadInstructions() : null);
+    const instructions = combineInstructions(
+      this.instructionsPath ? await this.loadInstructions() : null,
+      input.instructions ?? null,
+    );
     const parts: string[] = [];
     if (instructions) {
-      parts.push(`[System Instructions]\n${instructions}\n[End Instructions]`);
+      parts.push(instructions);
+      parts.push("---");
     }
     parts.push(input.text);
     parts.push(...input.files.map((file) => `Attachment: ${file}`));

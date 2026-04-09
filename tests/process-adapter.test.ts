@@ -224,7 +224,35 @@ describe("ProcessCodexAdapter", () => {
       child.close(0);
       await promise;
 
-      expect(calls[0]?.args[3]).toContain("[System Instructions]\nYou are bot alpha.\n[End Instructions]\nHello");
+      expect(calls[0]?.args[3]).toContain("You are bot alpha.\n---\nHello");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("merges bridge instructions with instance agent instructions", async () => {
+    const { spawnCodex, child, calls } = createSpawnHarness();
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const instructionsPath = path.join(root, "agent.md");
+
+    try {
+      await writeFile(instructionsPath, "You are bot alpha.", "utf8");
+      const adapter = new ProcessCodexAdapter("codex", undefined, spawnCodex, instructionsPath);
+
+      const promise = adapter.sendUserMessage("telegram-12345", {
+        text: "Hello",
+        files: [],
+        instructions: "[Telegram Bridge Capabilities]\nUse file blocks.",
+      });
+      await waitForSpawn(calls);
+
+      child.stdout.emitData('{"type":"thread.started","thread_id":"thread-123"}\n');
+      child.stdout.emitData('{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}\n');
+      child.close(0);
+      await promise;
+
+      expect(calls[0]?.args[3]).toContain("You are bot alpha.");
+      expect(calls[0]?.args[3]).toContain("[Telegram Bridge Capabilities]");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

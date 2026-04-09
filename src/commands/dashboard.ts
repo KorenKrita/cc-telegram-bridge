@@ -20,20 +20,12 @@ interface InstanceSnapshot {
   policy: string;
   pairedUsers: number;
   allowlistCount: number;
-  pendingPairs: number;
   sessionBindings: number;
   lastHandledUpdateId: number | null;
   botTokenConfigured: boolean;
   agentMdPreview: string;
   claudeMdExists: boolean;
-  usage: {
-    requestCount: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-    totalCachedTokens: number;
-    totalCostUsd: number;
-    lastUpdatedAt: string;
-  };
+  usage: { requestCount: number; totalInputTokens: number; totalOutputTokens: number; totalCachedTokens: number; totalCostUsd: number; lastUpdatedAt: string };
   auditTotal: number;
   lastSuccess: string;
   lastFailure: string;
@@ -42,163 +34,156 @@ interface InstanceSnapshot {
   stateDir: string;
 }
 
-async function readJsonSafe<T>(filePath: string, fallback: T): Promise<T> {
-  try { return JSON.parse(await readFile(filePath, "utf8")) as T; } catch { return fallback; }
+async function rj<T>(fp: string, fb: T): Promise<T> { try { return JSON.parse(await readFile(fp, "utf8")) as T; } catch { return fb; } }
+async function fe(fp: string): Promise<boolean> { try { await stat(fp); return true; } catch { return false; } }
+async function tp(fp: string, m: number): Promise<string> { try { const t = (await readFile(fp, "utf8")).trim(); return t.length > m ? t.slice(0, m) + "..." : t; } catch { return ""; } }
+async function aal(fp: string): Promise<string[]> { try { return (await readFile(fp, "utf8")).split(/\r?\n/).filter(Boolean); } catch { return []; } }
+async function ll(fp: string): Promise<string> { try { const l = (await readFile(fp, "utf8")).split(/\r?\n/).map(s => s.trim()).filter(Boolean); return l.at(-1) ?? ""; } catch { return ""; } }
+
+function pa(line: string): InstanceSnapshot["recentAudit"][0] | null {
+  try { const e = JSON.parse(line) as Record<string, unknown>; return { type: (e.type as string) ?? "?", outcome: (e.outcome as string) ?? "?", timestamp: (e.timestamp as string) ?? "", detail: typeof e.detail === "string" ? e.detail : undefined }; } catch { return null; }
 }
 
-async function fileExists(filePath: string): Promise<boolean> {
-  try { await stat(filePath); return true; } catch { return false; }
-}
-
-async function readTextPreview(filePath: string, maxChars: number): Promise<string> {
-  try {
-    const raw = await readFile(filePath, "utf8");
-    const t = raw.trim();
-    return t.length > maxChars ? t.slice(0, maxChars) + "..." : t;
-  } catch { return ""; }
-}
-
-async function readAllAuditLines(filePath: string): Promise<string[]> {
-  try { return (await readFile(filePath, "utf8")).split(/\r?\n/).filter(Boolean); } catch { return []; }
-}
-
-async function readLastLine(filePath: string): Promise<string> {
-  try {
-    const lines = (await readFile(filePath, "utf8")).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    return lines.at(-1) ?? "";
-  } catch { return ""; }
-}
-
-function parseAuditEvent(line: string): InstanceSnapshot["recentAudit"][0] | null {
-  try {
-    const e = JSON.parse(line) as Record<string, unknown>;
-    return { type: (e.type as string) ?? "?", outcome: (e.outcome as string) ?? "?", timestamp: (e.timestamp as string) ?? "", detail: typeof e.detail === "string" ? e.detail : undefined };
-  } catch { return null; }
-}
-
-async function collectInstance(channelsDir: string, name: string): Promise<InstanceSnapshot> {
-  const dir = path.join(channelsDir, name);
-  const config = await readJsonSafe<{ engine?: string; approvalMode?: string; verbosity?: number }>(path.join(dir, "config.json"), {});
-  const lock = await readJsonSafe<{ pid?: number } | null>(path.join(dir, "instance.lock.json"), null);
-  const access = await readJsonSafe<{ policy?: string; pairedUsers?: unknown[]; allowlist?: unknown[]; pendingPairs?: unknown[] }>(path.join(dir, "access.json"), {});
-  const session = await readJsonSafe<{ chats?: unknown[] }>(path.join(dir, "session.json"), {});
-  const runtime = await readJsonSafe<{ lastHandledUpdateId?: number | null }>(path.join(dir, "runtime-state.json"), {});
-  const usage = await readJsonSafe<InstanceSnapshot["usage"]>(path.join(dir, "usage.json"), { requestCount: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCachedTokens: 0, totalCostUsd: 0, lastUpdatedAt: "" });
-  const allAudit = await readAllAuditLines(path.join(dir, "audit.log.jsonl"));
-  const recentParsed = allAudit.slice(-10).map(parseAuditEvent).filter((e): e is NonNullable<typeof e> => e !== null);
-  let lastSuccess = "", lastFailure = "";
-  for (let i = allAudit.length - 1; i >= 0; i--) {
-    const evt = parseAuditEvent(allAudit[i]);
-    if (!evt) continue;
-    if (!lastSuccess && evt.outcome === "success") lastSuccess = evt.timestamp;
-    if (!lastFailure && evt.outcome === "error") lastFailure = evt.timestamp;
-    if (lastSuccess && lastFailure) break;
-  }
+async function ci(cd: string, name: string): Promise<InstanceSnapshot> {
+  const d = path.join(cd, name);
+  const cfg = await rj<{ engine?: string; approvalMode?: string; verbosity?: number }>(path.join(d, "config.json"), {});
+  const lk = await rj<{ pid?: number } | null>(path.join(d, "instance.lock.json"), null);
+  const ac = await rj<{ policy?: string; pairedUsers?: unknown[]; allowlist?: unknown[] }>(path.join(d, "access.json"), {});
+  const ss = await rj<{ chats?: unknown[] }>(path.join(d, "session.json"), {});
+  const rt = await rj<{ lastHandledUpdateId?: number | null }>(path.join(d, "runtime-state.json"), {});
+  const us = await rj<InstanceSnapshot["usage"]>(path.join(d, "usage.json"), { requestCount: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCachedTokens: 0, totalCostUsd: 0, lastUpdatedAt: "" });
+  const aa = await aal(path.join(d, "audit.log.jsonl"));
+  const ra = aa.slice(-8).map(pa).filter((e): e is NonNullable<typeof e> => e !== null);
+  let ls = "", lf = "";
+  for (let i = aa.length - 1; i >= 0; i--) { const e = pa(aa[i]); if (!e) continue; if (!ls && e.outcome === "success") ls = e.timestamp; if (!lf && e.outcome === "error") lf = e.timestamp; if (ls && lf) break; }
   let running = false;
-  if (lock?.pid) { try { process.kill(lock.pid, 0); running = true; } catch { running = false; } }
-
+  if (lk?.pid) { try { process.kill(lk.pid, 0); running = true; } catch { running = false; } }
   return {
-    name, engine: config.engine ?? "codex", approvalMode: config.approvalMode ?? "normal", verbosity: config.verbosity ?? 1,
-    running, pid: running ? (lock?.pid ?? null) : null, policy: access.policy ?? "pairing",
-    pairedUsers: Array.isArray(access.pairedUsers) ? access.pairedUsers.length : 0,
-    allowlistCount: Array.isArray(access.allowlist) ? access.allowlist.length : 0,
-    pendingPairs: Array.isArray(access.pendingPairs) ? access.pendingPairs.length : 0,
-    sessionBindings: Array.isArray(session.chats) ? session.chats.length : 0,
-    lastHandledUpdateId: runtime.lastHandledUpdateId ?? null,
-    botTokenConfigured: await fileExists(path.join(dir, ".env")),
-    agentMdPreview: await readTextPreview(path.join(dir, "agent.md"), 200),
-    claudeMdExists: await fileExists(path.join(dir, "workspace", "CLAUDE.md")),
-    usage, auditTotal: allAudit.length, lastSuccess, lastFailure,
-    lastError: (await readLastLine(path.join(dir, "service.stderr.log"))).slice(0, 200),
-    recentAudit: recentParsed, stateDir: dir,
+    name, engine: cfg.engine ?? "codex", approvalMode: cfg.approvalMode ?? "normal", verbosity: cfg.verbosity ?? 1,
+    running, pid: running ? (lk?.pid ?? null) : null, policy: ac.policy ?? "pairing",
+    pairedUsers: Array.isArray(ac.pairedUsers) ? ac.pairedUsers.length : 0,
+    allowlistCount: Array.isArray(ac.allowlist) ? ac.allowlist.length : 0,
+    sessionBindings: Array.isArray(ss.chats) ? ss.chats.length : 0,
+    lastHandledUpdateId: rt.lastHandledUpdateId ?? null,
+    botTokenConfigured: await fe(path.join(d, ".env")),
+    agentMdPreview: await tp(path.join(d, "agent.md"), 160),
+    claudeMdExists: await fe(path.join(d, "workspace", "CLAUDE.md")),
+    usage: us, auditTotal: aa.length, lastSuccess: ls, lastFailure: lf,
+    lastError: (await ll(path.join(d, "service.stderr.log"))).slice(0, 200),
+    recentAudit: ra, stateDir: d,
   };
 }
 
-function e(s: string): string { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
-function ft(iso: string): string {
-  if (!iso) return "—";
-  try { return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }); } catch { return iso.slice(0, 16); }
+function esc(s: string): string { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function ft(iso: string): string { if (!iso) return "--"; try { return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }); } catch { return iso.slice(0, 16); } }
+
+// Generate a deterministic geometric SVG pattern for each instance
+function geoPattern(name: string, w: number, h: number): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+  const abs = (n: number) => (n < 0 ? -n : n);
+  const colors = ["#C1392B", "#2B6CB0", "#8B6914", "#1A1A1A", "#6B7280", "#7C8C3C", "#D4A574", "#3B82F6", "#92400E", "#64748B"];
+  const shapes: string[] = [];
+  const seed = abs(hash);
+  const variant = seed % 3;
+
+  for (let i = 0; i < 12; i++) {
+    const s = (seed * (i + 1) * 7) % 1000;
+    const x = (s * 3) % w;
+    const y = ((s * 7) % h);
+    const c = colors[(s * 11) % colors.length];
+    const size = 8 + (s % 20);
+    const opacity = 0.5 + (s % 50) / 100;
+
+    if (variant === 0) {
+      // Circles
+      shapes.push(`<circle cx="${x}" cy="${y}" r="${size}" fill="${c}" opacity="${opacity}"/>`);
+    } else if (variant === 1) {
+      // Rectangles
+      const rot = (s * 13) % 45;
+      shapes.push(`<rect x="${x}" y="${y}" width="${size * 1.5}" height="${size * 1.5}" fill="${c}" opacity="${opacity}" transform="rotate(${rot} ${x + size * 0.75} ${y + size * 0.75})"/>`);
+    } else {
+      // Mixed
+      if (i % 2 === 0) {
+        shapes.push(`<circle cx="${x}" cy="${y}" r="${size * 0.8}" fill="${c}" opacity="${opacity}"/>`);
+      } else {
+        shapes.push(`<rect x="${x}" y="${y}" width="${size}" height="${size}" fill="${c}" opacity="${opacity}"/>`);
+      }
+    }
+  }
+
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="border-radius:12px">${shapes.join("")}</svg>`;
 }
 
 function renderHtml(instances: InstanceSnapshot[]): string {
   const now = new Date().toISOString();
   const total = instances.length;
-  const alive = instances.filter((i) => i.running).length;
+  const alive = instances.filter(i => i.running).length;
   const reqs = instances.reduce((s, i) => s + i.usage.requestCount, 0);
   const cost = instances.reduce((s, i) => s + i.usage.totalCostUsd, 0);
   const toks = instances.reduce((s, i) => s + i.usage.totalInputTokens + i.usage.totalOutputTokens, 0);
 
-  const statCards = [
-    { label: "Fleet", value: `${alive}<span style="font-size:14px;color:#64748B">/${total}</span>`, sub: "instances online", gradient: "linear-gradient(135deg, #818CF820, #818CF808)" },
-    { label: "Requests", value: reqs.toLocaleString(), sub: "total processed", gradient: "linear-gradient(135deg, #22D3EE20, #22D3EE08)" },
-    { label: "Tokens", value: toks > 1e6 ? `${(toks/1e6).toFixed(1)}M` : toks.toLocaleString(), sub: "in + out", gradient: "linear-gradient(135deg, #FDBA7420, #FDBA7408)" },
-    { label: "Spend", value: cost > 0 ? `$${cost.toFixed(2)}` : "—", sub: "estimated USD", gradient: "linear-gradient(135deg, #C084FC20, #C084FC08)" },
-  ].map(({ label, value, sub, gradient }) => `
-    <div class="stat-card" style="background:${gradient}">
-      <div class="stat-label">${label}</div>
-      <div class="stat-value">${value}</div>
-      <div class="stat-sub">${sub}</div>
-    </div>`).join("");
+  const stats = [
+    { label: "Fleet", value: `${alive}/${total}` },
+    { label: "Requests", value: reqs.toLocaleString() },
+    { label: "Tokens", value: toks > 1e6 ? `${(toks / 1e6).toFixed(1)}M` : toks.toLocaleString() },
+    { label: "Cost", value: cost > 0 ? `$${cost.toFixed(2)}` : "--" },
+  ].map(s => `<div class="stat"><div class="stat-val">${s.value}</div><div class="stat-lbl">${s.label}</div></div>`).join("");
 
-  const cards = instances.map((inst) => {
-    const dot = inst.running ? "#34D399" : "#EF4444";
-    const eng = inst.engine === "claude" ? { bg: "#C084FC18", fg: "#D8B4FE", border: "#C084FC30" } : { bg: "#22D3EE18", fg: "#67E8F9", border: "#22D3EE30" };
-    const yolo = inst.approvalMode === "bypass" ? `<span class="badge" style="background:#EF444418;color:#FCA5A5;border-color:#EF444430">UNSAFE</span>`
-      : inst.approvalMode === "full-auto" ? `<span class="badge" style="background:#F59E0B18;color:#FDE68A;border-color:#F59E0B30">YOLO</span>` : "";
-    const costStr = inst.usage.totalCostUsd > 0 ? `$${inst.usage.totalCostUsd.toFixed(4)}` : "—";
+  const cards = instances.map(inst => {
+    const statusColor = inst.running ? "#2D8B46" : "#C1392B";
+    const statusText = inst.running ? "Online" : "Offline";
+    const engLabel = inst.engine.charAt(0).toUpperCase() + inst.engine.slice(1);
+    const yoloLabel = inst.approvalMode === "bypass" ? " / Unsafe" : inst.approvalMode === "full-auto" ? " / YOLO" : "";
+    const costStr = inst.usage.totalCostUsd > 0 ? `$${inst.usage.totalCostUsd.toFixed(4)}` : "--";
     const cacheRatio = (inst.usage.totalInputTokens + inst.usage.totalCachedTokens) > 0
       ? Math.round(inst.usage.totalCachedTokens / (inst.usage.totalInputTokens + inst.usage.totalCachedTokens) * 100) : 0;
-    const agentHtml = inst.agentMdPreview
-      ? `<div class="agent-preview">${e(inst.agentMdPreview)}</div>` : `<div class="agent-empty">no agent.md</div>`;
-    const auditHtml = inst.recentAudit.length > 0
-      ? inst.recentAudit.map((ev) => {
-          const c = ev.outcome === "error" ? "#FCA5A5" : ev.outcome === "success" ? "#86EFAC" : "#94A3B8";
-          return `<div class="audit-line"><span class="audit-time">${ft(ev.timestamp)}</span> <span style="color:${c}">${e(ev.type)} → ${ev.outcome}</span></div>`;
-        }).join("") : '<div class="audit-empty">No events yet</div>';
+    const pattern = geoPattern(inst.name, 280, 120);
+
+    const auditRows = inst.recentAudit.map(ev => {
+      const c = ev.outcome === "error" ? "#C1392B" : ev.outcome === "success" ? "#2D8B46" : "#6B7280";
+      return `<tr><td class="au-t">${ft(ev.timestamp)}</td><td style="color:${c}">${esc(ev.type)}</td><td style="color:${c}">${ev.outcome}</td></tr>`;
+    }).join("");
 
     return `
     <div class="card">
-      <div class="card-glass"></div>
-      <div class="card-content">
-        <div class="card-header">
-          <div class="card-title"><div class="status-dot" style="background:${dot};box-shadow:0 0 12px ${dot}60"></div>${e(inst.name)}</div>
-          <div class="card-badges"><span class="badge" style="background:${eng.bg};color:${eng.fg};border-color:${eng.border}">${inst.engine}</span>${yolo}</div>
+      <div class="card-art">${pattern}</div>
+      <div class="card-body">
+        <div class="card-head">
+          <h2>${esc(inst.name)}</h2>
+          <div class="card-meta">
+            <span class="tag" style="background:${statusColor}">${statusText}</span>
+            <span class="tag tag-outline">${engLabel}${yoloLabel}</span>
+          </div>
         </div>
 
-        <div class="personality-bar" style="border-left-color:${eng.fg}">
-          ${agentHtml}
-          ${inst.claudeMdExists ? '<span class="claude-md-tag">+ CLAUDE.md</span>' : ""}
-        </div>
-
-        <div class="pill-row">
-          <span class="pill">${inst.running ? "Running" : "Stopped"}${inst.pid ? ` · ${inst.pid}` : ""}</span>
-          <span class="pill">${inst.policy}${inst.policy === "allowlist" ? ` (${inst.allowlistCount})` : ""}</span>
-          <span class="pill">${inst.botTokenConfigured ? "Token ✓" : "No token"}</span>
-          <span class="pill">v${inst.verbosity}</span>
-        </div>
+        ${inst.agentMdPreview ? `<blockquote class="personality">${esc(inst.agentMdPreview)}${inst.claudeMdExists ? " <em>+CLAUDE.md</em>" : ""}</blockquote>` : ""}
 
         <div class="metrics">
-          <div class="metric"><div class="metric-val" style="color:#22D3EE">${inst.usage.requestCount.toLocaleString()}</div><div class="metric-label">Requests</div></div>
-          <div class="metric"><div class="metric-val" style="color:#C084FC">${costStr}</div><div class="metric-label">Cost</div></div>
-          <div class="metric"><div class="metric-val" style="color:#FDBA74">${(inst.usage.totalInputTokens + inst.usage.totalOutputTokens).toLocaleString()}</div><div class="metric-label">Tokens</div></div>
-          <div class="metric"><div class="metric-val" style="color:#34D399">${cacheRatio}%</div><div class="metric-label">Cache</div></div>
+          <div><span class="m-val">${inst.usage.requestCount.toLocaleString()}</span><span class="m-lbl">Requests</span></div>
+          <div><span class="m-val">${costStr}</span><span class="m-lbl">Cost</span></div>
+          <div><span class="m-val">${(inst.usage.totalInputTokens + inst.usage.totalOutputTokens).toLocaleString()}</span><span class="m-lbl">Tokens</span></div>
+          <div><span class="m-val">${cacheRatio}%</span><span class="m-lbl">Cache</span></div>
         </div>
 
-        <div class="detail-grid">
-          <div>Sessions <span class="detail-val">${inst.sessionBindings}</span></div>
-          <div>Paired <span class="detail-val">${inst.pairedUsers}</span></div>
-          <div>Success <span class="detail-val" style="color:#86EFAC">${ft(inst.lastSuccess)}</span></div>
-          <div>Failure <span class="detail-val" style="color:#FCA5A5">${ft(inst.lastFailure)}</span></div>
+        <div class="details">
+          <div>Sessions <strong>${inst.sessionBindings}</strong></div>
+          <div>Paired <strong>${inst.pairedUsers}</strong></div>
+          <div>Policy <strong>${inst.policy}</strong></div>
+          <div>Verbosity <strong>${inst.verbosity}</strong></div>
+          <div>Last OK <strong style="color:#2D8B46">${ft(inst.lastSuccess)}</strong></div>
+          <div>Last Err <strong style="color:#C1392B">${ft(inst.lastFailure)}</strong></div>
         </div>
 
-        ${inst.lastError ? `<div class="error-bar">${e(inst.lastError)}</div>` : ""}
+        ${inst.lastError ? `<div class="err">${esc(inst.lastError)}</div>` : ""}
 
-        <div class="audit-section">
-          <div class="audit-header"><span>Activity</span><span class="audit-count">${inst.auditTotal.toLocaleString()}</span></div>
-          <div class="audit-scroll">${auditHtml}</div>
-        </div>
+        ${inst.recentAudit.length > 0 ? `
+        <details class="audit">
+          <summary>Activity <span class="au-count">${inst.auditTotal.toLocaleString()}</span></summary>
+          <table>${auditRows}</table>
+        </details>` : ""}
 
-        <div class="card-footer">${e(inst.stateDir)}</div>
+        <div class="card-foot">${esc(inst.stateDir)}</div>
       </div>
     </div>`;
   }).join("\n");
@@ -207,82 +192,105 @@ function renderHtml(instances: InstanceSnapshot[]): string {
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CC Telegram Bridge — Dashboard</title>
+<title>CC Telegram Bridge</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',-apple-system,'Segoe UI',sans-serif;background:#06080F;color:#F1F5F9;min-height:100vh;padding:32px 20px}
-body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse at 20% 0%,#818CF810 0%,transparent 50%),radial-gradient(ellipse at 80% 100%,#22D3EE08 0%,transparent 50%);pointer-events:none;z-index:0}
-.wrap{max-width:1280px;margin:0 auto;position:relative;z-index:1}
-.header{text-align:center;margin-bottom:28px}
-.header h1{font-size:28px;font-weight:800;background:linear-gradient(90deg,#22D3EE,#818CF8,#C084FC);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-0.5px}
-.header .sub{color:#475569;font-size:12px;margin-top:4px}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
-.stat-card{border:1px solid rgba(148,163,184,0.06);border-radius:16px;padding:20px;text-align:center;backdrop-filter:blur(8px)}
-.stat-label{color:#64748B;font-size:10px;text-transform:uppercase;letter-spacing:2px;margin-bottom:6px}
-.stat-value{font-size:28px;font-weight:800;color:#F1F5F9;line-height:1.2}
-.stat-sub{color:#475569;font-size:10px;margin-top:2px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(540px,1fr));gap:18px}
-.card{position:relative;border-radius:20px;overflow:hidden;border:1px solid rgba(148,163,184,0.06)}
-.card-glass{position:absolute;inset:0;background:linear-gradient(135deg,rgba(15,20,40,0.8),rgba(10,15,30,0.95));backdrop-filter:blur(20px)}
-.card-content{position:relative;z-index:1;padding:22px;display:flex;flex-direction:column;gap:12px}
-.card-header{display:flex;justify-content:space-between;align-items:center}
-.card-title{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:700}
-.status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
-.card-badges{display:flex;gap:6px}
-.badge{padding:3px 10px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid}
-.personality-bar{background:rgba(255,255,255,0.02);border-left:3px solid;padding:8px 12px;border-radius:0 10px 10px 0}
-.agent-preview{color:#94A3B8;font-size:11px;font-style:italic;line-height:1.5;max-height:42px;overflow:hidden}
-.agent-empty{color:#334155;font-size:11px}
-.claude-md-tag{color:#D8B4FE;font-size:10px;margin-top:2px;display:inline-block}
-.pill-row{display:flex;gap:6px;flex-wrap:wrap}
-.pill{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.04);padding:3px 10px;border-radius:20px;font-size:11px;color:#94A3B8}
-.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.metric{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);border-radius:12px;padding:12px;text-align:center}
-.metric-val{font-size:16px;font-weight:700;line-height:1.3}
-.metric-label{color:#475569;font-size:9px;text-transform:uppercase;letter-spacing:1px;margin-top:2px}
-.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:11px;color:#64748B}
-.detail-val{color:#CBD5E1;margin-left:4px}
-.error-bar{background:rgba(248,113,113,0.06);border:1px solid rgba(248,113,113,0.1);border-radius:10px;padding:8px 12px;font-size:10px;color:#FCA5A5;font-family:'SF Mono',Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.audit-section{}
-.audit-header{display:flex;justify-content:space-between;margin-bottom:6px;font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#475569}
-.audit-count{color:#334155}
-.audit-scroll{background:rgba(0,0,0,0.3);border-radius:10px;padding:8px 10px;max-height:130px;overflow-y:auto}
-.audit-line{font-size:10px;padding:2px 0;font-family:'SF Mono',Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.audit-time{color:#334155;margin-right:4px}
-.audit-empty{color:#334155;font-size:11px}
-.card-footer{color:#1E293B;font-size:9px;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.footer{text-align:center;margin-top:36px;color:#334155;font-size:11px}
-.footer code{background:rgba(255,255,255,0.04);padding:2px 8px;border-radius:4px;color:#475569}
-::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#1E293B;border-radius:2px}
-@media(max-width:620px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
+body{font-family:'Inter',system-ui,sans-serif;background:#EFEDEA;color:#1A1A1A;min-height:100vh;padding:48px 32px}
+.wrap{max-width:1200px;margin:0 auto}
+
+/* Header */
+.header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:48px;border-bottom:2px solid #1A1A1A;padding-bottom:20px}
+.header h1{font-family:'DM Serif Display',serif;font-size:36px;font-weight:400;letter-spacing:-0.5px}
+.header .sub{font-size:12px;color:#6B7280;text-transform:uppercase;letter-spacing:2px}
+.header .mark{font-family:'JetBrains Mono',monospace;font-size:11px;color:#6B7280}
+
+/* Stats bar */
+.stats{display:flex;gap:48px;margin-bottom:48px}
+.stat{text-align:left}
+.stat-val{font-family:'DM Serif Display',serif;font-size:32px;line-height:1}
+.stat-lbl{font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:2px;margin-top:4px}
+
+/* Grid */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));gap:24px}
+
+/* Card */
+.card{background:#FAFAF8;border:1px solid #D4D0CB;border-radius:16px;overflow:hidden;transition:box-shadow 0.2s}
+.card:hover{box-shadow:0 4px 24px rgba(0,0,0,0.06)}
+.card-art{padding:0;line-height:0}
+.card-art svg{width:100%;height:auto;display:block}
+.card-body{padding:24px}
+.card-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px}
+.card-head h2{font-family:'DM Serif Display',serif;font-size:24px;font-weight:400}
+.card-meta{display:flex;gap:6px;flex-shrink:0}
+.tag{display:inline-block;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;color:#fff;letter-spacing:0.5px}
+.tag-outline{background:transparent;color:#1A1A1A;border:1px solid #1A1A1A}
+.personality{border-left:3px solid #D4D0CB;padding:8px 14px;margin:0 0 16px 0;font-size:13px;color:#6B7280;font-style:italic;line-height:1.5;max-height:50px;overflow:hidden}
+.personality em{color:#8B6914;font-style:normal;font-size:11px}
+
+/* Metrics */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#D4D0CB;border:1px solid #D4D0CB;border-radius:8px;overflow:hidden;margin-bottom:16px}
+.metrics>div{background:#FAFAF8;padding:12px;text-align:center}
+.m-val{display:block;font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600}
+.m-lbl{display:block;font-size:9px;color:#6B7280;text-transform:uppercase;letter-spacing:1.5px;margin-top:2px}
+
+/* Details grid */
+.details{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 16px;font-size:12px;color:#6B7280;margin-bottom:12px}
+.details strong{color:#1A1A1A;margin-left:4px;font-weight:600}
+
+/* Error */
+.err{background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:10px;color:#C1392B;margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Audit */
+.audit{margin-bottom:8px}
+.audit summary{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#6B7280;cursor:pointer;user-select:none}
+.audit summary:hover{color:#1A1A1A}
+.au-count{font-family:'JetBrains Mono',monospace;color:#D4D0CB;margin-left:4px}
+.audit table{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px;font-family:'JetBrains Mono',monospace}
+.audit td{padding:2px 8px 2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.au-t{color:#D4D0CB}
+
+/* Footer */
+.card-foot{font-family:'JetBrains Mono',monospace;font-size:9px;color:#D4D0CB;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.footer{text-align:center;margin-top:48px;font-size:11px;color:#D4D0CB;letter-spacing:1px;text-transform:uppercase}
+.footer code{font-family:'JetBrains Mono',monospace;color:#6B7280}
+
+@media(max-width:600px){
+  .grid{grid-template-columns:1fr}
+  .stats{flex-wrap:wrap;gap:24px}
+  .header{flex-direction:column;align-items:flex-start;gap:8px}
+}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="header">
-    <h1>CC Telegram Bridge</h1>
-    <div class="sub">${now.slice(0,19).replace("T"," ")} UTC</div>
+    <div>
+      <h1>CC Telegram Bridge</h1>
+      <div class="sub">Instance Dashboard</div>
+    </div>
+    <div class="mark">${now.slice(0, 19).replace("T", " ")} UTC</div>
   </div>
-  <div class="stats">${statCards}</div>
-  <div class="grid">${instances.length > 0 ? cards : '<div style="text-align:center;color:#334155;grid-column:1/-1;padding:80px 0;font-size:15px">No instances found<br><span style="font-size:12px">Run <code>telegram configure &lt;token&gt;</code></span></div>'}</div>
-  <div class="footer">Read-only snapshot · <code>telegram dashboard</code> to refresh</div>
+  <div class="stats">${stats}</div>
+  <div class="grid">${instances.length > 0 ? cards : '<div style="grid-column:1/-1;text-align:center;padding:80px 0;color:#6B7280;font-size:14px">No instances found.<br><code style="font-size:12px">telegram configure &lt;token&gt;</code></div>'}</div>
+  <div class="footer">Read-only snapshot &middot; <code>telegram dashboard</code> to refresh</div>
 </div>
 </body>
 </html>`;
 }
 
-function openBrowser(filePath: string): void {
-  const cmd = process.platform === "win32" ? `start "" "${filePath}"` : process.platform === "darwin" ? `open "${filePath}"` : `xdg-open "${filePath}"`;
+function openBrowser(fp: string): void {
+  const cmd = process.platform === "win32" ? `start "" "${fp}"` : process.platform === "darwin" ? `open "${fp}"` : `xdg-open "${fp}"`;
   exec(cmd, () => {});
 }
 
 export async function generateDashboard(env: Pick<EnvSource, "HOME" | "USERPROFILE">, outputPath?: string): Promise<string> {
-  const channelsDir = resolveChannelsDir(env);
+  const cd = resolveChannelsDir(env);
   let names: string[];
-  try { names = (await readdir(channelsDir, { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name).sort(); } catch { names = []; }
-  const instances = await Promise.all(names.map((n) => collectInstance(channelsDir, n)));
+  try { names = (await readdir(cd, { withFileTypes: true })).filter(e => e.isDirectory()).map(e => e.name).sort(); } catch { names = []; }
+  const instances = await Promise.all(names.map(n => ci(cd, n)));
   const html = renderHtml(instances);
-  const out = outputPath ?? path.join(channelsDir, "dashboard.html");
+  const out = outputPath ?? path.join(cd, "dashboard.html");
   await writeFile(out, html, "utf8");
   openBrowser(out);
   return out;

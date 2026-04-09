@@ -141,6 +141,40 @@ describe("ProcessClaudeAdapter", () => {
     }
   });
 
+  it("merges bridge instructions with instance agent instructions", async () => {
+    const { child, calls, spawnFn } = createSpawnHarness();
+    const root = await mkdtemp(path.join(os.tmpdir(), "cc-telegram-bridge-"));
+    const instructionsPath = path.join(root, "agent.md");
+
+    try {
+      await writeFile(instructionsPath, "You are a reviewer.", "utf8");
+      const adapter = new ProcessClaudeAdapter("claude", {
+        spawnFn,
+        instructionsPath,
+      });
+
+      const promise = adapter.sendUserMessage("telegram-12345", {
+        text: "Hello",
+        files: [],
+        instructions: "[Telegram Bridge Capabilities]\nUse file blocks.",
+      });
+      await waitForSpawn(calls);
+
+      child.stdout.emitData('{"type":"result","result":"ok","session_id":"session-abc"}');
+      child.close(0);
+      await promise;
+
+      expect(calls[0]?.args).toContain("--system-prompt");
+      const systemPrompt = calls[0]?.args[calls[0].args.indexOf("--system-prompt") + 1];
+      expect(systemPrompt).toContain("You are a reviewer.");
+      expect(calls[0]?.args).toContain("--append-system-prompt");
+      const appendPrompt = calls[0]?.args[calls[0].args.indexOf("--append-system-prompt") + 1];
+      expect(appendPrompt).toContain("[Telegram Bridge Capabilities]");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes quoted Windows claude.cmd paths", async () => {
     const { child, calls, spawnFn } = createSpawnHarness();
     const adapter = new ProcessClaudeAdapter('"C:\\Users\\hangw\\AppData\\Roaming\\npm\\claude.cmd"', {

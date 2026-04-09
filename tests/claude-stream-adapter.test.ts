@@ -220,6 +220,40 @@ describe("ClaudeStreamAdapter", () => {
     }
   });
 
+  it("merges bridge instructions with instance agent instructions", async () => {
+    const { children, calls, spawnFn } = createSpawnHarness();
+    const root = await mkdtemp(path.join(os.tmpdir(), "cc-telegram-bridge-"));
+    const instructionsPath = path.join(root, "agent.md");
+
+    try {
+      await writeFile(instructionsPath, "You are v1.", "utf8");
+      const adapter = new ClaudeStreamAdapter("claude", {
+        spawnFn,
+        instructionsPath,
+      });
+
+      const promise = adapter.sendUserMessage("telegram-12345", {
+        text: "Hello",
+        files: [],
+        instructions: "[Telegram Bridge Capabilities]\nUse file blocks.",
+      });
+
+      await waitFor(() => children.length === 1 && children[0].stdin.lines.length === 1);
+      const systemPromptIndex = calls[0]?.args.indexOf("--system-prompt") ?? -1;
+      expect(systemPromptIndex).toBeGreaterThan(-1);
+      expect(calls[0]?.args[systemPromptIndex + 1]).toContain("You are v1.");
+      const appendIndex = calls[0]?.args.indexOf("--append-system-prompt") ?? -1;
+      expect(appendIndex).toBeGreaterThan(-1);
+      expect(calls[0]?.args[appendIndex + 1]).toContain("[Telegram Bridge Capabilities]");
+
+      children[0].stdout.emitData('{"type":"system","subtype":"init","session_id":"session-123"}\n');
+      children[0].stdout.emitData('{"type":"result","subtype":"success","is_error":false,"result":"OK","session_id":"session-123"}\n');
+      await promise;
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects structured error results", async () => {
     const { children, spawnFn } = createSpawnHarness();
     const adapter = new ClaudeStreamAdapter("claude", {

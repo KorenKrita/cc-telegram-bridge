@@ -101,6 +101,11 @@ function buildCommandInvocation(command: string, args: string[]): { command: str
   return { command: normalizedCommand, args, shell: false };
 }
 
+function combineInstructions(primary: string | null, secondary: string | null): string | null {
+  const parts = [primary?.trim(), secondary?.trim()].filter((value): value is string => Boolean(value));
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
 export class ClaudeStreamAdapter implements CodexAdapter {
   private readonly childEnv: NodeJS.ProcessEnv;
   private readonly spawnClaude: SpawnClaude;
@@ -180,10 +185,11 @@ export class ClaudeStreamAdapter implements CodexAdapter {
   }
 
   async sendUserMessage(sessionId: string, input: CodexUserMessageInput): Promise<CodexAdapterResponse> {
-    const instructions = input.instructions ?? (this.instructionsPath ? await this.loadInstructions() : null);
+    const agentInstructions = this.instructionsPath ? await this.loadInstructions() : null;
+    const bridgeInstructions = input.instructions ?? null;
     const approvalMode = this.configPath ? await this.loadApprovalMode() : "normal";
-    const prompt = this.buildPrompt(input, instructions);
-    const worker = this.getOrCreateWorker(sessionId, instructions, approvalMode);
+    const prompt = this.buildPrompt(input);
+    const worker = this.getOrCreateWorker(sessionId, agentInstructions, bridgeInstructions, approvalMode);
 
     const response = await this.sendTurn(worker, prompt);
     const nextSessionId = response.sessionId;
@@ -198,20 +204,18 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     };
   }
 
-  private buildPrompt(input: CodexUserMessageInput, instructions: string | null): string {
+  private buildPrompt(input: CodexUserMessageInput): string {
     const parts: string[] = [];
-    if (instructions) {
-      parts.push(`[System Instructions]\n${instructions}\n[End Instructions]`);
-    }
     parts.push(input.text);
     parts.push(...input.files.map((file) => `Attachment: ${file}`));
     return parts.join("\n");
   }
 
-  private getOrCreateWorker(sessionId: string, instructions: string | null, approvalMode: ApprovalMode): ClaudeWorker {
+  private getOrCreateWorker(sessionId: string, agentInstructions: string | null, bridgeInstructions: string | null, approvalMode: ApprovalMode): ClaudeWorker {
+    const combinedKey = combineInstructions(agentInstructions, bridgeInstructions);
     const existing = this.workers.get(sessionId);
     if (existing) {
-      if (existing.instructions === instructions && existing.approvalMode === approvalMode) {
+      if (existing.instructions === combinedKey && existing.approvalMode === approvalMode) {
         return existing;
       }
 
@@ -229,8 +233,11 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     }
 
     const args = ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json"];
-    if (instructions) {
-      args.push("--system-prompt", instructions);
+    if (agentInstructions) {
+      args.push("--system-prompt", agentInstructions);
+    }
+    if (bridgeInstructions) {
+      args.push("--append-system-prompt", bridgeInstructions);
     }
     if (!isLogicalTelegramSessionId(sessionId)) {
       args.push("-r", sessionId);
@@ -258,7 +265,7 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       lineBuffer: "",
       currentSessionId: isLogicalTelegramSessionId(sessionId) ? null : sessionId,
       pendingTurn: null,
-      instructions,
+      instructions: combinedKey,
       approvalMode,
     };
 

@@ -43,7 +43,14 @@ describe("Bridge", () => {
     expect(adapter.sendUserMessage).toHaveBeenCalledWith("telegram-84", {
       text: "hello",
       files: [],
+      instructions: expect.stringContaining("Telegram chat bridge"),
     });
+    expect((adapter.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.instructions).toContain(
+      "```file:example.py",
+    );
+    expect((adapter.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.instructions).toContain(
+      "deliver it as a Telegram document attachment",
+    );
     expect(result.text).toBe("done");
     expect(sessionManager.bindSession).not.toHaveBeenCalled();
   });
@@ -307,6 +314,10 @@ describe("Bridge", () => {
     expect(adapter.sendUserMessage).toHaveBeenCalledWith("telegram-84", {
       text: "answer this\n\n[Quoted message #99]\nquoted text",
       files: [],
+      instructions: expect.stringContaining("Telegram chat bridge"),
     });
+    expect((adapter.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.instructions).toContain(
+      "deliver it as a Telegram document attachment",
+    );
   });
 });

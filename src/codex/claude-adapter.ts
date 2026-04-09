@@ -86,6 +86,11 @@ function buildCommandInvocation(command: string, args: string[]): { command: str
   return { command: normalizedCommand, args, shell: false };
 }
 
+function combineInstructions(primary: string | null, secondary: string | null): string | null {
+  const parts = [primary?.trim(), secondary?.trim()].filter((value): value is string => Boolean(value));
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
 export class ProcessClaudeAdapter implements CodexAdapter {
   private readonly childEnv: NodeJS.ProcessEnv;
   private readonly spawnClaude: SpawnClaude;
@@ -164,7 +169,8 @@ export class ProcessClaudeAdapter implements CodexAdapter {
   }
 
   async sendUserMessage(sessionId: string, input: CodexUserMessageInput): Promise<CodexAdapterResponse> {
-    const instructions = input.instructions ?? (this.instructionsPath ? await this.loadInstructions() : null);
+    const agentInstructions = this.instructionsPath ? await this.loadInstructions() : null;
+    const bridgeInstructions = input.instructions ?? null;
     const approvalMode = this.configPath ? await this.loadApprovalMode() : "normal";
 
     // Build prompt with files
@@ -176,9 +182,14 @@ export class ProcessClaudeAdapter implements CodexAdapter {
     // Build args
     const args: string[] = ["-p", "--output-format", "json"];
 
-    // System prompt from agent.md
-    if (instructions) {
-      args.push("--system-prompt", instructions);
+    // Agent personality from agent.md → --system-prompt
+    if (agentInstructions) {
+      args.push("--system-prompt", agentInstructions);
+    }
+
+    // Bridge capabilities → --append-system-prompt (trusted, not confused with injection)
+    if (bridgeInstructions) {
+      args.push("--append-system-prompt", bridgeInstructions);
     }
 
     // Resume existing session

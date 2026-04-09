@@ -40,6 +40,20 @@ export interface BridgeAccessDecision {
   text?: string;
 }
 
+function renderTelegramBridgeCapabilities(): string {
+  return [
+    "You are running inside a Telegram chat bridge. The bridge supports delivering files to the user.",
+    "When the user asks you to generate, create, or send a file, include exactly one fenced code block in your reply using this format:",
+    "",
+    "```file:example.py",
+    "print('hello')",
+    "```",
+    "",
+    "The bridge will automatically extract the block and deliver it as a Telegram document attachment.",
+    "Use this for small text or code files. For large files, save them to the workspace instead.",
+  ].join("\n");
+}
+
 export class Bridge {
   constructor(
     private readonly accessStore: AccessStoreLike,
@@ -108,12 +122,15 @@ export class Bridge {
     }
 
     const session = await this.sessionManager.getOrCreateSession(input.chatId);
-    const text = input.replyContext
+    const baseText = input.replyContext
       ? `${input.text}\n\n[Quoted message #${input.replyContext.messageId}]\n${input.replyContext.text || "(no text content)"}`
       : input.text;
+    const text = baseText;
+    const instructions = renderTelegramBridgeCapabilities();
     const response = await this.adapter.sendUserMessage(session.sessionId, {
       text,
       files: input.files,
+      instructions,
       onProgress: input.onProgress,
     });
 

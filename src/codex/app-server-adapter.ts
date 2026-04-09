@@ -54,6 +54,7 @@ type PendingRequest = {
 type PendingTurn = {
   chunks: string[];
   finalText?: string;
+  errorMessage?: string;
   turnId?: string;
   resolve: (text: string) => void;
   reject: (error: Error) => void;
@@ -314,13 +315,67 @@ export class CodexAppServerAdapter implements CodexAdapter {
       }
 
       this.pendingTurns.delete(threadId);
-      void this.completeTurn(threadId, turnId, pending);
+      const turnErrorMessage = this.readTurnErrorMessage(parsed.params?.turn);
+      if (turnErrorMessage) {
+        pending.reject(new Error(turnErrorMessage));
+        return;
+      }
+
+      void this.completeTurn(threadId, turnId, pending).catch((error) => {
+        pending.reject(error instanceof Error ? error : new Error(String(error)));
+      });
+      return;
+    }
+
+    if (parsed.method === "error") {
+      const threadId = this.readString(parsed.params?.threadId);
+      const pending = threadId ? this.pendingTurns.get(threadId) : undefined;
+      const errorMessage = this.readErrorMessage(parsed.params?.error);
+
+      if (pending && errorMessage) {
+        pending.errorMessage = errorMessage;
+      }
       return;
     }
   }
 
   private readString(value: unknown): string | null {
     return typeof value === "string" ? value : null;
+  }
+
+  private readErrorMessage(value: unknown): string | null {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "message" in value &&
+      typeof (value as { message?: unknown }).message === "string"
+    ) {
+      const message = (value as { message: string }).message.trim();
+      return message || null;
+    }
+
+    return null;
+  }
+
+  private readTurnErrorMessage(value: unknown): string | null {
+    if (typeof value !== "object" || value === null) {
+      return null;
+    }
+
+    const turn = value as {
+      status?: unknown;
+      error?: unknown;
+    };
+    const errorMessage = this.readErrorMessage(turn.error);
+    if (errorMessage) {
+      return errorMessage;
+    }
+
+    if (turn.status === "failed") {
+      return "Codex turn failed.";
+    }
+
+    return null;
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -415,13 +470,27 @@ export class CodexAppServerAdapter implements CodexAdapter {
     let text = pending.finalText ?? pending.chunks.join("");
 
     if (!text) {
-      text = await this.readTurnText(threadId, turnId);
+      const turnResult = await this.readTurnResult(threadId, turnId);
+      if (turnResult.errorMessage) {
+        pending.reject(new Error(turnResult.errorMessage));
+        return;
+      }
+
+      text = turnResult.text;
+    }
+
+    if (!text.trim() && pending.errorMessage) {
+      pending.reject(new Error(pending.errorMessage));
+      return;
     }
 
     pending.resolve(text);
   }
 
-  private async readTurnText(threadId: string, turnId: string | undefined): Promise<string> {
+  private async readTurnResult(
+    threadId: string,
+    turnId: string | undefined,
+  ): Promise<{ text: string; errorMessage?: string }> {
     const result = (await this.request("thread/read", {
       threadId,
       includeTurns: true,
@@ -429,6 +498,10 @@ export class CodexAppServerAdapter implements CodexAdapter {
       thread?: {
         turns?: Array<{
           id?: string;
+          status?: string;
+          error?: {
+            message?: string;
+          } | null;
           items?: Array<{
             type?: string;
             text?: string;
@@ -442,15 +515,23 @@ export class CodexAppServerAdapter implements CodexAdapter {
       (turnId ? turns.find((turn) => turn.id === turnId) : undefined) ??
       turns.at(-1);
 
+    const turnErrorMessage = this.readErrorMessage(targetTurn?.error);
+    if (targetTurn?.status === "failed" && turnErrorMessage) {
+      return {
+        text: "",
+        errorMessage: turnErrorMessage,
+      };
+    }
+
     const items = targetTurn?.items ?? [];
     for (let index = items.length - 1; index >= 0; index--) {
       const item = items[index];
       if (item?.type === "agentMessage" && typeof item.text === "string" && item.text.trim()) {
-        return item.text;
+        return { text: item.text };
       }
     }
 
-    return "";
+    return { text: "" };
   }
 
   private failAllPending(error: Error): void {

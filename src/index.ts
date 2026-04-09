@@ -22,6 +22,7 @@ async function main(): Promise<void> {
         HOME: process.env.HOME,
         APPDATA: process.env.APPDATA,
         USERPROFILE: process.env.USERPROFILE,
+        CODEX_HOME: process.env.CODEX_HOME,
         CODEX_TELEGRAM_STATE_DIR: process.env.CODEX_TELEGRAM_STATE_DIR,
         CODEX_EXECUTABLE: process.env.CODEX_EXECUTABLE,
         CLAUDE_EXECUTABLE: process.env.CLAUDE_EXECUTABLE,

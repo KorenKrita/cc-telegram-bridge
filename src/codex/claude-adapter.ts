@@ -42,6 +42,12 @@ interface ClaudeJsonResult {
   is_error?: boolean;
   result?: string;
   session_id?: string;
+  total_cost_usd?: number;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
 }
 
 const MAX_INSTRUCTIONS_CHARS = 16_000;
@@ -198,10 +204,11 @@ export class ProcessClaudeAdapter implements CodexAdapter {
     return {
       text: parsed.text,
       sessionId: parsed.sessionId,
+      usage: parsed.usage,
     };
   }
 
-  private parseResult(stdout: string): { text: string; sessionId?: string } {
+  private parseResult(stdout: string): { text: string; sessionId?: string; usage?: { inputTokens: number; outputTokens: number; cachedTokens?: number; costUsd?: number } } {
     const trimmed = stdout.trim();
     if (!trimmed) {
       return { text: "Claude returned an empty response." };
@@ -214,9 +221,17 @@ export class ProcessClaudeAdapter implements CodexAdapter {
         return { text: `Error: ${json.result ?? "Unknown error"}` };
       }
 
+      const usage = json.usage ? {
+        inputTokens: json.usage.input_tokens ?? 0,
+        outputTokens: json.usage.output_tokens ?? 0,
+        cachedTokens: json.usage.cache_read_input_tokens ?? 0,
+        costUsd: json.total_cost_usd ?? undefined,
+      } : undefined;
+
       return {
         text: json.result?.trim() || "Claude completed the request.",
         sessionId: json.session_id ?? undefined,
+        usage,
       };
     } catch {
       // If not valid JSON, return raw output

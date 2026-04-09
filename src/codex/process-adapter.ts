@@ -50,6 +50,14 @@ type CodexJsonEvent =
       error?: {
         message?: string;
       };
+    }
+  | {
+      type: "turn.completed";
+      usage?: {
+        input_tokens?: number;
+        cached_input_tokens?: number;
+        output_tokens?: number;
+      };
     };
 
 function parseJsonEvents(stdout: string): CodexJsonEvent[] {
@@ -107,6 +115,19 @@ function extractLastTurnFailureMessage(events: CodexJsonEvent[]): string | null 
   }
 
   return lastMessage;
+}
+
+function extractUsage(events: CodexJsonEvent[]): { inputTokens: number; outputTokens: number; cachedTokens: number } | null {
+  for (const event of events) {
+    if (event.type === "turn.completed" && event.usage) {
+      return {
+        inputTokens: event.usage.input_tokens ?? 0,
+        outputTokens: event.usage.output_tokens ?? 0,
+        cachedTokens: event.usage.cached_input_tokens ?? 0,
+      };
+    }
+  }
+  return null;
 }
 
 function extractLastErrorMessage(events: CodexJsonEvent[]): string | null {
@@ -283,6 +304,7 @@ export class ProcessCodexAdapter implements CodexAdapter {
     const lastAgentMessage = extractLastAgentMessage(events);
     const threadId = extractThreadId(events);
     const turnFailureMessage = extractLastTurnFailureMessage(events);
+    const turnUsage = extractUsage(events);
 
     if (turnFailureMessage) {
       throw new Error(turnFailureMessage);
@@ -299,6 +321,7 @@ export class ProcessCodexAdapter implements CodexAdapter {
     return {
       text: lastAgentMessage?.trim() || `Session ${sessionId} completed.`,
       sessionId: threadId ?? undefined,
+      usage: turnUsage ?? undefined,
     };
   }
 

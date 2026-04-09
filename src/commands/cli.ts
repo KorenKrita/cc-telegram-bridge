@@ -666,6 +666,70 @@ async function runEngineCommand(
   return true;
 }
 
+async function runUsageCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+): Promise<boolean> {
+  const { instanceName } = extractInstanceOption(argv.slice(1));
+  const stateDir = resolveInstanceStateDir({
+    HOME: env.HOME,
+    USERPROFILE: env.USERPROFILE,
+    CODEX_TELEGRAM_STATE_DIR: env.CODEX_TELEGRAM_STATE_DIR,
+    CODEX_TELEGRAM_INSTANCE: instanceName,
+  });
+
+  const { UsageStore } = await import("../state/usage-store.js");
+  const store = new UsageStore(stateDir);
+  const usage = await store.load();
+
+  if (usage.requestCount === 0) {
+    logger.log(`Instance "${instanceName}": no usage recorded yet.`);
+    return true;
+  }
+
+  const cost = usage.totalCostUsd > 0 ? `$${usage.totalCostUsd.toFixed(4)}` : "unknown (Codex does not report USD)";
+  logger.log([
+    `Instance: ${instanceName}`,
+    `Requests: ${usage.requestCount}`,
+    `Input tokens: ${usage.totalInputTokens.toLocaleString()}`,
+    `Output tokens: ${usage.totalOutputTokens.toLocaleString()}`,
+    `Cached tokens: ${usage.totalCachedTokens.toLocaleString()}`,
+    `Estimated cost: ${cost}`,
+    `Last updated: ${usage.lastUpdatedAt}`,
+  ].join("\n"));
+  return true;
+}
+
+async function runVerbosityCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+): Promise<boolean> {
+  const { instanceName, args } = extractInstanceOption(argv.slice(1));
+  const configPath = resolveConfigJsonPath(env, instanceName);
+
+  if (args.length === 0) {
+    const config = await readInstanceConfig(configPath);
+    const v = config.verbosity ?? 1;
+    const label = v === 0 ? "quiet (no progress)" : v === 2 ? "detailed (1s updates)" : "normal (2s updates)";
+    logger.log(`Instance "${instanceName}": verbosity = ${v} (${label})`);
+    return true;
+  }
+
+  const level = Number(args[0]);
+  if (level !== 0 && level !== 1 && level !== 2) {
+    throw new Error("Usage: telegram verbosity [0|1|2] [--instance <name>]\n  0 = quiet, 1 = normal (default), 2 = detailed");
+  }
+
+  const config = await readInstanceConfig(configPath);
+  config.verbosity = level;
+  await writeInstanceConfig(configPath, config);
+  const label = level === 0 ? "quiet (no progress)" : level === 2 ? "detailed (1s updates)" : "normal (2s updates)";
+  logger.log(`Instance "${instanceName}": verbosity set to ${level} (${label}).`);
+  return true;
+}
+
 const HELP_TEXT = `Usage: telegram <command> [options]
 
 Commands:
@@ -682,6 +746,8 @@ Commands:
                                               Manage per-instance agent.md
   yolo [on|off|unsafe] [--instance <name>]    Toggle YOLO auto-approval mode
   engine [codex|claude] [--instance <name>]   Switch AI engine per instance
+  usage [--instance <name>]                   Show token usage and cost
+  verbosity [0|1|2] [--instance <name>]       Set progress output level
   help                                        Show this help message`;
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<boolean> {
@@ -732,6 +798,14 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   if (normalized[0] === "engine") {
     return runEngineCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "usage") {
+    return runUsageCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "verbosity") {
+    return runVerbosityCommand(normalized, env, logger);
   }
 
   return false;

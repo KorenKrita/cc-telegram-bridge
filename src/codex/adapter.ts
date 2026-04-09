@@ -2,9 +2,17 @@ export interface CodexSessionHandle {
   sessionId: string;
 }
 
+export interface AdapterUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens?: number;
+  costUsd?: number;
+}
+
 export interface CodexAdapterResponse {
   text: string;
   sessionId?: string;
+  usage?: AdapterUsage;
 }
 
 export interface CodexUserMessageInput {

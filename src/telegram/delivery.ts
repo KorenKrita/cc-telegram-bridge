@@ -3,6 +3,20 @@ import path from "node:path";
 
 import { Bridge } from "../runtime/bridge.js";
 import { appendAuditEvent } from "../state/audit-log.js";
+import { UsageStore } from "../state/usage-store.js";
+import { readFile } from "node:fs/promises";
+
+async function loadVerbosity(stateDir: string): Promise<number> {
+  try {
+    const raw = await readFile(path.join(stateDir, "config.json"), "utf8");
+    const config = JSON.parse(raw) as { verbosity?: number };
+    const v = config.verbosity;
+    if (v === 0 || v === 1 || v === 2) return v;
+    return 1;
+  } catch {
+    return 1;
+  }
+}
 import {
   chunkTelegramMessage,
   renderAccessCheckMessage,
@@ -162,10 +176,12 @@ export async function handleNormalizedTelegramMessage(
     const files = await downloadAttachments(context.api, context.inboxDir, normalized.attachments);
     await context.api.editMessage(normalized.chatId, placeholderMessageId, renderExecutionMessage());
 
+    const verbosity = await loadVerbosity(path.dirname(context.inboxDir));
     let lastProgressEdit = 0;
-    const PROGRESS_THROTTLE_MS = 2000;
+    const PROGRESS_THROTTLE_MS = verbosity === 2 ? 1000 : 2000;
     const progressMessageId = placeholderMessageId;
     const onProgress = (partialText: string) => {
+      if (verbosity === 0) return;
       if (progressMessageId === undefined) return;
       const now = Date.now();
       if (now - lastProgressEdit < PROGRESS_THROTTLE_MS) return;
@@ -198,6 +214,17 @@ export async function handleNormalizedTelegramMessage(
     progressEditsClosed = true;
     lastAllowedProgressEditCounter = progressEditCounter;
     await progressEditChain;
+
+    if (result.usage) {
+      const usageStore = new UsageStore(path.dirname(context.inboxDir));
+      await usageStore.record({
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        cachedTokens: result.usage.cachedTokens,
+        costUsd: result.usage.costUsd,
+      });
+    }
+
     await deliverTelegramResponse(context.api, normalized.chatId, placeholderMessageId, result.text, () => {
       placeholderShowsResponse = true;
     });

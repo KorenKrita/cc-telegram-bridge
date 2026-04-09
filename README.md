@@ -1,5 +1,5 @@
-<p align="right">
-  <a href="./README.zh-CN.md">中文</a>
+<p align="center">
+  <strong>English</strong>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="./README.zh-CN.md"><strong>中文文档</strong></a>
 </p>
 
 <p align="center">

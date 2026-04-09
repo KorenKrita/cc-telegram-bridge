@@ -25,6 +25,8 @@
   <a href="#-双引擎">双引擎</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-多-bot-部署">多 Bot</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-agent-指令">agent.md</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-yolo-模式">YOLO</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-快速开始">快速开始</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-架构">架构</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-服务运维">运维</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-访问控制">访问控制</a>
 </p>
 
+> **RULE 1：** 让你的 Claude Code 或 Codex CLI 来帮你配置这个项目。克隆仓库，在终端里打开，然后告诉你的 AI agent：*"读一下 README，帮我配置一个 Telegram bot"*。剩下的它会搞定。
+
 ---
 
 ## 双引擎：Codex + Claude Code

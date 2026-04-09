@@ -747,7 +747,7 @@ describe("polling helpers", () => {
       expect(api.editMessage).toHaveBeenNthCalledWith(1, 123, 11, "Checking access policy...");
       expect(api.editMessage).toHaveBeenNthCalledWith(2, 123, 11, "Downloading 2 attachments...");
       expect(api.editMessage).toHaveBeenNthCalledWith(3, 123, 11, "Running Codex on your request...");
-      expect(bridge.handleAuthorizedMessage).toHaveBeenCalledWith({
+      expect(bridge.handleAuthorizedMessage).toHaveBeenCalledWith(expect.objectContaining({
         chatId: 123,
         userId: 456,
         chatType: "private",
@@ -757,7 +757,7 @@ describe("polling helpers", () => {
           path.join(inboxDir, "doc-1-report.pdf"),
           path.join(inboxDir, "photo-1.jpg"),
         ],
-      });
+      }));
       await expect(readFile(path.join(inboxDir, "doc-1-report.pdf"), "utf8")).resolves.toBe("x");
       await expect(readFile(path.join(inboxDir, "photo-1.jpg"), "utf8")).resolves.toBe("x");
     } finally {
@@ -937,7 +937,7 @@ describe("polling helpers", () => {
       },
     );
 
-    expect(bridge.handleAuthorizedMessage).toHaveBeenCalledWith({
+    expect(bridge.handleAuthorizedMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: 123,
       userId: 456,
       chatType: "private",
@@ -947,7 +947,7 @@ describe("polling helpers", () => {
         text: "quoted text",
       },
       files: [],
-    });
+    }));
   });
 
   it("sends a document when the model returns a file block", async () => {

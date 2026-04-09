@@ -11,6 +11,7 @@ export interface CodexUserMessageInput {
   text: string;
   files: string[];
   instructions?: string;
+  onProgress?: (partialText: string) => void;
 }
 
 export interface CodexAdapter {

@@ -95,6 +95,7 @@ export class Bridge {
       text: string;
     };
     files: string[];
+    onProgress?: (partialText: string) => void;
   }) {
     const decision = await this.checkAccess(input);
     if (decision.kind === "deny") {
@@ -113,6 +114,7 @@ export class Bridge {
     const response = await this.adapter.sendUserMessage(session.sessionId, {
       text,
       files: input.files,
+      onProgress: input.onProgress,
     });
 
     if (response.sessionId && response.sessionId !== session.sessionId) {

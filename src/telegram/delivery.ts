@@ -157,6 +157,20 @@ export async function handleNormalizedTelegramMessage(
 
     const files = await downloadAttachments(context.api, context.inboxDir, normalized.attachments);
     await context.api.editMessage(normalized.chatId, placeholderMessageId, renderExecutionMessage());
+
+    let lastProgressEdit = 0;
+    const PROGRESS_THROTTLE_MS = 2000;
+    const progressMessageId = placeholderMessageId;
+    const onProgress = (partialText: string) => {
+      if (progressMessageId === undefined) return;
+      const now = Date.now();
+      if (now - lastProgressEdit < PROGRESS_THROTTLE_MS) return;
+      if (!partialText || partialText.length < 5) return;
+      lastProgressEdit = now;
+      const preview = partialText.length > 4000 ? `${partialText.slice(-4000)}\n\n...` : partialText;
+      context.api.editMessage(normalized.chatId, progressMessageId, preview).catch(() => {});
+    };
+
     const result = await context.bridge.handleAuthorizedMessage({
       chatId: normalized.chatId,
       userId: normalized.userId,
@@ -164,6 +178,7 @@ export async function handleNormalizedTelegramMessage(
       text: normalized.text,
       replyContext: normalized.replyContext,
       files,
+      onProgress,
     });
 
     await deliverTelegramResponse(context.api, normalized.chatId, placeholderMessageId, result.text, () => {

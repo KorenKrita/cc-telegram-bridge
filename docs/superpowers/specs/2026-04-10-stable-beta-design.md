@@ -81,7 +81,7 @@ This layer should provide:
 
 - health inspection
 - session inspection and reset
-- task inspection and cleanup
+- task listing and cleanup
 - quick diagnostic summaries
 - safer restarts
 
@@ -237,24 +237,22 @@ Add commands to inspect and clear chat session state.
 
 Suggested commands:
 
-- `session list --instance <name>`
-- `session inspect --instance <name> --chat <chatId>`
-- `session reset --instance <name> --chat <chatId>`
+- `session inspect --instance <name> <chat-id>`
+- `session reset --instance <name> <chat-id>`
 
 Behavior:
 
 - session reset should clear only the selected chat session binding
 - access policy and pairing state remain unchanged
 
-### 3. Task Inspection and Cleanup
+### 3. Task Listing and Cleanup
 
 Add commands to inspect and clear file workflow tasks.
 
 Suggested commands:
 
 - `task list --instance <name>`
-- `task inspect --instance <name> --upload <uploadId>`
-- `task clear --instance <name> --upload <uploadId>`
+- `task clear --instance <name> <upload-id>`
 
 The operator should be able to see:
 
@@ -299,8 +297,6 @@ Add a small set of user-facing commands:
 
 - `/status`
 - `/reset`
-- `/tasks`
-- `/continue`
 - `/help`
 
 These commands should map to existing bridge concepts and not create parallel logic.
@@ -321,7 +317,7 @@ File flows should tell the user exactly what to do next.
 
 Examples:
 
-- after archive summary, instruct the user to reply with `/continue` or `继续分析`
+- after archive summary, instruct the user to use the Continue Analysis button or reply with `继续分析`
 - after file send success, state what was delivered
 - after a failure, explain whether it was caused by file size, permissions, Telegram delivery, or engine behavior
 

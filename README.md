@@ -336,6 +336,20 @@ Telegram Update → Normalize → Access Check → Chat Queue (serialized)
 
 All commands accept `--instance <name>` to target a specific bot.
 
+## Stable Beta Commands
+
+- `telegram service doctor --instance <name>`
+- `telegram session inspect --instance <name> <chat-id>`
+- `telegram session reset --instance <name> <chat-id>`
+- `telegram task list --instance <name>`
+- `telegram task clear --instance <name> <upload-id>`
+
+Telegram users can also use:
+
+- `/status`
+- `/reset`
+- `/help`
+
 ### Shell Helpers
 
 **Windows (PowerShell):**
@@ -366,15 +380,6 @@ npm run dev -- telegram access policy allowlist
 npm run dev -- telegram access allow <chat-id>
 npm run dev -- telegram access revoke <chat-id>
 npm run dev -- telegram status [--instance work]
-```
-
----
-
-## Session Inspection
-
-```bash
-npm run dev -- telegram session list [--instance work]
-npm run dev -- telegram session show [--instance work] <chat-id>
 ```
 
 ---
@@ -453,7 +458,7 @@ Mount `~/.codex` to persist state across container restarts.
 <details>
 <summary><strong>Bot does not reply</strong></summary>
 
-1. Run `telegram service doctor` to diagnose
+1. Run `telegram service doctor --instance <name>` to diagnose
 2. Check `telegram service logs` for errors
 3. Verify the engine is installed: `codex --version` or `claude --version`
 

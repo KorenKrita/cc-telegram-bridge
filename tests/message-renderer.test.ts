@@ -10,10 +10,12 @@ import {
   chunkTelegramMessage,
   renderAccessCheckMessage,
   renderAttachmentDownloadMessage,
+  renderCategorizedErrorMessage,
   renderErrorMessage,
   renderExecutionMessage,
   renderPairingMessage,
   renderPrivateChatRequiredMessage,
+  renderSessionResetMessage,
   renderUnauthorizedMessage,
   renderWorkingMessage,
 } from "../src/telegram/message-renderer.js";
@@ -57,6 +59,20 @@ describe("message rendering", () => {
     expect(renderUnauthorizedMessage()).toBe("This chat is not authorized for this instance.");
     expect(renderPrivateChatRequiredMessage()).toBe("This bot only accepts private chats.");
     expect(renderPairingMessage("ABC123")).toBe("Pair this private chat with code ABC123");
+  });
+
+  it("renders categorized error and reset messages", () => {
+    expect(renderSessionResetMessage()).toBe("Session reset for this chat.");
+    expect(renderCategorizedErrorMessage("write-permission", "write access denied")).toBe(
+      "Error: File creation is blocked by the current write policy. Reset the chat or retry in a writable mode.",
+    );
+    expect(renderCategorizedErrorMessage("auth", "missing auth")).toBe(
+      "Error: Engine authentication is missing or expired. Re-login for this instance and retry.",
+    );
+    expect(renderCategorizedErrorMessage("telegram-conflict", "409 conflict")).toBe(
+      "Error: Another Telegram poller is using this bot token. Stop the duplicate service and retry.",
+    );
+    expect(renderCategorizedErrorMessage("unknown", "boom")).toBe("Error: boom");
   });
 });
 

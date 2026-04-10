@@ -17,6 +17,7 @@ import { classifyFailure } from "../runtime/error-classification.js";
 import { FileWorkflowStore } from "../state/file-workflow-store.js";
 import { UsageStore } from "../state/usage-store.js";
 import { readFile } from "node:fs/promises";
+import { SessionStore } from "../state/session-store.js";
 
 async function loadVerbosity(stateDir: string): Promise<number> {
   try {
@@ -43,9 +44,11 @@ import {
   chunkTelegramMessage,
   renderAccessCheckMessage,
   renderAttachmentDownloadMessage,
+  renderCategorizedErrorMessage,
   renderErrorMessage,
   renderExecutionMessage,
   renderUnauthorizedMessage,
+  renderSessionResetMessage,
   renderWorkingMessage,
 } from "./message-renderer.js";
 import { TelegramApi } from "./api.js";
@@ -61,6 +64,10 @@ export interface TelegramDeliveryContext {
 
 function wantsTelegramOut(text: string): boolean {
   return /(发.*文件|传.*文件|发送.*文件|导出.*文件|文件.*传|文件.*发|生成.*文件|generate.*file|send.*file|export.*file)/i.test(text);
+}
+
+function isResetCommand(text: string): boolean {
+  return /^\/reset(?:@\w+)?(?:\s|$)/i.test(text.trim());
 }
 
 function inferExtension(attachment: NormalizedTelegramAttachment, telegramFilePath: string): string {
@@ -164,11 +171,33 @@ export async function handleNormalizedTelegramMessage(
   let telegramOutDirPath: string | undefined;
   const stateDir = path.dirname(context.inboxDir);
   const workflowStore = new FileWorkflowStore(stateDir);
+  const sessionStore = new SessionStore(path.join(stateDir, "session.json"));
 
   try {
     const placeholder = await context.api.sendMessage(normalized.chatId, renderWorkingMessage());
     placeholderMessageId = placeholder.message_id;
     await context.api.editMessage(normalized.chatId, placeholderMessageId, renderAccessCheckMessage());
+
+    if (isResetCommand(normalized.text)) {
+      const resetMessage = renderSessionResetMessage();
+      await sessionStore.removeByChatId(normalized.chatId);
+      await context.api.editMessage(normalized.chatId, placeholderMessageId, resetMessage);
+      await appendAuditEvent(path.dirname(context.inboxDir), {
+        type: "update.handle",
+        instanceName: context.instanceName,
+        chatId: normalized.chatId,
+        userId: normalized.userId,
+        updateId: context.updateId,
+        outcome: "success",
+        metadata: {
+          durationMs: Date.now() - startedAt,
+          attachments: normalized.attachments.length,
+          responseChars: resetMessage.length,
+          chunkCount: chunkTelegramMessage(resetMessage).length,
+        },
+      });
+      return;
+    }
 
     const accessDecision = await context.bridge.checkAccess({
       chatId: normalized.chatId,
@@ -357,11 +386,21 @@ export async function handleNormalizedTelegramMessage(
     }
 
     if (placeholderShowsResponse) {
-      await context.api.sendMessage(normalized.chatId, renderErrorMessage(message));
+      await context.api.sendMessage(
+        normalized.chatId,
+        renderCategorizedErrorMessage(classifyFailure(error), message),
+      );
     } else if (placeholderMessageId !== undefined) {
-      await context.api.editMessage(normalized.chatId, placeholderMessageId, renderErrorMessage(message));
+      await context.api.editMessage(
+        normalized.chatId,
+        placeholderMessageId,
+        renderCategorizedErrorMessage(classifyFailure(error), message),
+      );
     } else {
-      await context.api.sendMessage(normalized.chatId, renderErrorMessage(message));
+      await context.api.sendMessage(
+        normalized.chatId,
+        renderCategorizedErrorMessage(classifyFailure(error), message),
+      );
     }
 
     await appendAuditEvent(path.dirname(context.inboxDir), {

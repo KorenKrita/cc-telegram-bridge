@@ -1,3 +1,5 @@
+import type { FailureCategory } from "../runtime/error-classification.js";
+
 export function chunkTelegramMessage(text: string, limit = 4000): string[] {
   if (!Number.isInteger(limit) || !Number.isFinite(limit) || limit <= 0) {
     throw new RangeError("limit must be a positive integer");
@@ -18,6 +20,26 @@ export function renderWorkingMessage(): string {
 
 export function renderErrorMessage(error: string): string {
   return `Error: ${error}`;
+}
+
+export function renderSessionResetMessage(): string {
+  return "Session reset for this chat.";
+}
+
+export function renderCategorizedErrorMessage(category: FailureCategory, detail: string): string {
+  if (category === "write-permission") {
+    return "Error: File creation is blocked by the current write policy. Reset the chat or retry in a writable mode.";
+  }
+
+  if (category === "auth") {
+    return "Error: Engine authentication is missing or expired. Re-login for this instance and retry.";
+  }
+
+  if (category === "telegram-conflict") {
+    return "Error: Another Telegram poller is using this bot token. Stop the duplicate service and retry.";
+  }
+
+  return renderErrorMessage(detail);
 }
 
 export function renderAccessCheckMessage(): string {

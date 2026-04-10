@@ -1107,6 +1107,94 @@ describe("polling helpers", () => {
     }
   });
 
+  it("resets the current chat session when /reset is sent", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await writeFile(
+      path.join(root, "session.json"),
+      JSON.stringify({
+        chats: [
+          {
+            telegramChatId: 123,
+            codexSessionId: "thread-old",
+            status: "idle",
+            updatedAt: "2026-04-10T00:00:00.000Z",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      getFile: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockResolvedValue({ text: "done" }),
+    };
+
+    try {
+      await handleNormalizedTelegramMessage(
+        {
+          chatId: 123,
+          userId: 456,
+          chatType: "private",
+          text: "/reset",
+          replyContext: undefined,
+          attachments: [],
+        },
+        {
+          api: api as never,
+          bridge: bridge as never,
+          inboxDir,
+        },
+      );
+
+      expect(api.editMessage).toHaveBeenLastCalledWith(123, 11, "Session reset for this chat.");
+      expect(JSON.parse(await readFile(path.join(root, "session.json"), "utf8"))).toEqual({ chats: [] });
+      expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("renders a write-permission error with recovery guidance", async () => {
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      getFile: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockRejectedValue(new Error("write access denied")),
+    };
+    const normalized = {
+      chatId: 123,
+      userId: 456,
+      chatType: "private" as const,
+      text: "hello",
+      replyContext: undefined,
+      attachments: [],
+    };
+
+    await expect(
+      handleNormalizedTelegramMessage(normalized, {
+        api: api as never,
+        bridge: bridge as never,
+        inboxDir: path.join(os.tmpdir(), "ignored"),
+      }),
+    ).rejects.toThrow();
+
+    expect(api.editMessage).toHaveBeenLastCalledWith(
+      123,
+      11,
+      "Error: File creation is blocked by the current write policy. Reset the chat or retry in a writable mode.",
+    );
+  });
+
   it("edits the placeholder to an error message when the bridge throws", async () => {
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),

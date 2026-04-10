@@ -574,7 +574,7 @@ export async function runServiceDoctor(
   });
   checks.push({
     name: "tasks",
-    ok: true,
+    ok: status.unresolvedTasksWarning === undefined,
     detail:
       status.unresolvedTasksWarning !== undefined
         ? `unresolved tasks: unknown (${status.unresolvedTasksWarning}).`

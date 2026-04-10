@@ -424,6 +424,44 @@ describe("telegram service commands", () => {
       expect(messages[0]).toContain("Instance: alpha");
       expect(messages[0]).toContain("unresolved tasks: unknown");
       expect(messages[0]).toContain("file workflow state unreadable");
+      expect(messages[0]).toContain("- fail tasks: unresolved tasks: unknown (file workflow state unreadable).");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports unknown unresolved tasks in service status when file workflow state is invalid", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+    const stateDir = path.join(tempDir, ".codex", "channels", "telegram", "alpha");
+    const lockPath = resolveInstanceLockPath(stateDir);
+
+    try {
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(
+        lockPath,
+        JSON.stringify({
+          pid: 12345,
+          token: "token",
+          acquiredAt: new Date().toISOString(),
+        }),
+        "utf8",
+      );
+      await writeFile(path.join(stateDir, "file-workflow.json"), "{not valid json", "utf8");
+
+      const handled = await runCli(["telegram", "service", "status", "--instance", "alpha"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+        serviceDeps: {
+          cwd: REPO_ROOT,
+          isProcessAlive: (pid) => pid === 12345,
+          isExpectedServiceProcess: (pid) => pid === 12345,
+        },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages[0]).toContain("Instance: alpha");
+      expect(messages[0]).toContain("Unresolved tasks: unknown (file workflow state unreadable)");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

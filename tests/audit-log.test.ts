@@ -74,8 +74,16 @@ describe("audit log", () => {
   });
 
   it("classifies explicit session-state failures but not generic session runtime errors", () => {
-    expect(classifyFailure("Session store corruption detected")).toBe("session-state");
-    expect(classifyFailure("Codex runtime session failed while starting")).toBe("engine-cli");
+    expect(classifyFailure(new Error("Session store corruption detected"))).toBe("session-state");
+    expect(classifyFailure(new Error("Codex runtime session failed while starting"))).toBe("engine-cli");
+  });
+
+  it("classifies direct Error objects into stable categories", () => {
+    expect(classifyFailure(new Error("boom"))).toBe("unknown");
+    expect(classifyFailure(new Error("Telegram API sendDocument failed: bad request"))).toBe("telegram-delivery");
+    expect(classifyFailure(new Error("Archive extraction failed for uploaded zip"))).toBe("file-workflow");
+    expect(classifyFailure(new Error("Codex runtime process failed to start"))).toBe("engine-cli");
+    expect(classifyFailure(new Error("Session binding store is unavailable"))).toBe("session-state");
   });
 
   it("falls back safely when failure metadata is invalid and preserves missing timestamps", () => {

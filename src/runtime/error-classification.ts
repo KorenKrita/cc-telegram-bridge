@@ -10,7 +10,7 @@ export type FailureCategory =
 
 function normalizeErrorText(error: unknown): string {
   if (error instanceof Error) {
-    return [error.name, error.message, error.stack].filter(Boolean).join("\n");
+    return [error.name, error.message].filter(Boolean).join("\n");
   }
 
   if (typeof error === "string") {
@@ -57,11 +57,11 @@ export function classifyFailure(error: unknown): FailureCategory {
   }
 
   if (
-    text.includes("codex") ||
-    text.includes("claude") ||
-    text.includes("app-server") ||
     text.includes("turn.failed") ||
-    text.includes("engine cli")
+    text.includes("app-server") ||
+    text.includes("engine cli") ||
+    (/(codex|claude)/.test(text) && /(runtime|process|spawn|adapter|binary|cli|failed|error|startup|start)/.test(text)) ||
+    (/(runtime|process|spawn|adapter|binary|cli)/.test(text) && /(codex|claude|engine)/.test(text))
   ) {
     return "engine-cli";
   }

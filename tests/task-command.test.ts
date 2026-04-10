@@ -2,11 +2,33 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { clearTask } from "../src/commands/task.js";
+import {
+  FILE_WORKFLOW_STATE_UNREADABLE_WARNING,
+  clearTask,
+  clearTaskWithRecovery,
+  listTasks,
+} from "../src/commands/task.js";
 
 describe("task commands", () => {
+  it("reports unreadable workflow state on list", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const workflowPath = path.join(homeDir, ".codex", "channels", "telegram", "alpha", "file-workflow.json");
+
+    try {
+      await mkdir(path.dirname(workflowPath), { recursive: true });
+      await writeFile(workflowPath, "{not valid json", "utf8");
+
+      await expect(listTasks({ USERPROFILE: homeDir }, "alpha")).resolves.toEqual({
+        tasks: [],
+        warning: FILE_WORKFLOW_STATE_UNREADABLE_WARNING,
+      });
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("clears the workflow record without deleting paths outside the telegram-files root", async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const stateDir = path.join(homeDir, ".codex", "channels", "telegram", "alpha");
@@ -81,6 +103,58 @@ describe("task commands", () => {
       await expect(clearTask({ USERPROFILE: homeDir }, "alpha", hostileUploadId)).resolves.toBe(true);
       await expect(readFile(sentinelPath, "utf8")).resolves.toBe("keep me");
       await expect(readFile(path.join(stateDir, "file-workflow.json"), "utf8")).resolves.toContain('"records": []');
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not delete workspace files before record removal succeeds", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const stateDir = path.join(homeDir, ".codex", "channels", "telegram", "alpha");
+    const workflowPath = path.join(stateDir, "file-workflow.json");
+    const uploadWorkspaceDir = path.join(stateDir, "workspace", ".telegram-files", "upload-123");
+    const artifactPath = path.join(uploadWorkspaceDir, "artifact.txt");
+
+    try {
+      await mkdir(uploadWorkspaceDir, { recursive: true });
+      await writeFile(artifactPath, "payload", "utf8");
+      await writeFile(
+        workflowPath,
+        JSON.stringify({
+          records: [
+            {
+              uploadId: "upload-123",
+              chatId: 84,
+              userId: 42,
+              kind: "archive",
+              status: "awaiting_continue",
+              sourceFiles: ["repo.zip"],
+              derivedFiles: [],
+              summary: "pending",
+              createdAt: "2026-04-08T12:00:00.000Z",
+              updatedAt: "2026-04-08T12:00:00.000Z",
+            },
+          ],
+        }) + "\n",
+        "utf8",
+      );
+
+      const removeWorkspaceDir = vi.fn(async () => {
+        throw new Error("workspace cleanup should not run after a failed metadata write");
+      });
+
+      await expect(
+        clearTaskWithRecovery({ USERPROFILE: homeDir }, "alpha", "upload-123", {
+          removeRecord: async () => {
+            throw new Error("persist failed");
+          },
+          removeWorkspaceDir,
+        }),
+      ).rejects.toThrow("persist failed");
+
+      await expect(readFile(artifactPath, "utf8")).resolves.toBe("payload");
+      await expect(readFile(workflowPath, "utf8")).resolves.toContain('"uploadId":"upload-123"');
+      expect(removeWorkspaceDir).not.toHaveBeenCalled();
     } finally {
       await rm(homeDir, { recursive: true, force: true });
     }

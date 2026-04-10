@@ -149,15 +149,22 @@ function formatSessionDetails(
   ].join("\n");
 }
 
-function formatTaskList(instanceName: string, tasks: Awaited<ReturnType<typeof listTasks>>): string {
-  const lines = [`Instance: ${instanceName}`, `Recent file workflow records: ${tasks.length}`];
+function formatTaskList(instanceName: string, result: Awaited<ReturnType<typeof listTasks>>): string {
+  const lines = [
+    `Instance: ${instanceName}`,
+    `Recent file workflow records: ${result.warning ? "unknown" : result.tasks.length}`,
+  ];
 
-  if (tasks.length === 0) {
+  if (result.warning) {
+    lines.push(`Warning: ${result.warning}`);
+  }
+
+  if (result.tasks.length === 0) {
     lines.push("Tasks: none");
     return lines.join("\n");
   }
 
-  for (const task of tasks) {
+  for (const task of result.tasks) {
     lines.push(`- ${task.uploadId} [${task.status}] chat ${task.chatId} kind=${task.kind} updated ${task.updatedAt}`);
   }
 
@@ -457,7 +464,11 @@ async function runTaskCommand(argv: string[], env: InstanceTokenEnv, logger: Cli
       throw new Error("Usage: telegram task list [--instance <name>]");
     }
 
-    logger.log(formatTaskList(instanceName, await listTasks(env, instanceName)));
+    const result = await listTasks(env, instanceName);
+    if (result.warning === FILE_WORKFLOW_STATE_UNREADABLE_WARNING) {
+      logger.log(`Task state unreadable for instance "${instanceName}".`);
+    }
+    logger.log(formatTaskList(instanceName, result));
     return true;
   }
 
@@ -882,12 +893,12 @@ Commands:
   access <pair|policy|allow|revoke> [--instance <name>]
                                               Manage access control
   status [--instance <name>]                  Show access policy and paired users
-  session inspect <chat-id> [--instance <name>]
-  session reset <chat-id> [--instance <name>]
-  session <list|show> [--instance <name>]     Inspect chat-to-thread bindings
+  session inspect [--instance <name>] <chat-id>
+  session reset [--instance <name>] <chat-id>
+  session <list|inspect> [--instance <name>]  Inspect chat-to-thread bindings
   task list [--instance <name>]               Inspect file workflow records
-  task inspect <upload-id> [--instance <name>] Inspect one file workflow record
-  task clear <upload-id> [--instance <name>]  Clear a file workflow record
+  task inspect [--instance <name>] <upload-id> Inspect one file workflow record
+  task clear [--instance <name>] <upload-id>  Clear a file workflow record
   audit [count] [--instance <name>] [--type <type>] [--chat <id>] [--outcome <outcome>]
                                               View audit trail
   instructions <show|set|path> [--instance <name>]

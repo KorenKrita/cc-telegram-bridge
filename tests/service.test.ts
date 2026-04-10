@@ -1750,7 +1750,7 @@ describe("polling helpers", () => {
     expect(api.editMessage).toHaveBeenLastCalledWith(
       123,
       11,
-      "Error: File creation is blocked by the current write policy. Reset the chat or retry in a writable mode.",
+      "Error: File creation is blocked by the current write policy. Retry in a writable mode.",
     );
   });
 

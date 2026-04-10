@@ -66,7 +66,7 @@ describe("message rendering", () => {
   it("renders categorized error and reset messages", () => {
     expect(renderSessionResetMessage()).toBe("Session reset for this chat.");
     expect(renderCategorizedErrorMessage("write-permission", "write access denied")).toBe(
-      "Error: File creation is blocked by the current write policy. Reset the chat or retry in a writable mode.",
+      "Error: File creation is blocked by the current write policy. Retry in a writable mode.",
     );
     expect(renderCategorizedErrorMessage("auth", "missing auth")).toBe(
       "Error: Engine authentication is missing or expired. Re-login for this instance and retry.",

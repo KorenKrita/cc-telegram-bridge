@@ -452,6 +452,29 @@ describe("runCli", () => {
     }
   });
 
+  it("surfaces unreadable workflow state during task list instead of pretending it is empty", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      const workflowPath = path.join(tempDir, ".codex", "channels", "telegram", "alpha", "file-workflow.json");
+      await mkdir(path.dirname(workflowPath), { recursive: true });
+      await writeFile(workflowPath, "{not valid json", "utf8");
+
+      const handled = await runCli(["telegram", "task", "list", "--instance", "alpha"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages[0]).toBe('Task state unreadable for instance "alpha".');
+      expect(messages[1]).toContain("Recent file workflow records: unknown");
+      expect(messages[1]).toContain("Tasks: none");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("inspects a task with source files, extracted directory, and failure detail", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const messages: string[] = [];

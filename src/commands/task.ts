@@ -11,6 +11,11 @@ import {
 
 export interface TaskCommandEnv extends Pick<EnvSource, "HOME" | "USERPROFILE" | "CODEX_TELEGRAM_STATE_DIR"> {}
 
+interface ClearTaskDeps {
+  removeRecord?: (store: FileWorkflowStore, uploadId: string) => Promise<boolean>;
+  removeWorkspaceDir?: (workspaceDir: string) => Promise<void>;
+}
+
 function resolveTaskStateDir(env: TaskCommandEnv, instanceName: string): string {
   return resolveInstanceStateDir({
     HOME: env.HOME,
@@ -42,10 +47,16 @@ function isSingleWorkspaceChildName(uploadId: string): boolean {
   return path.basename(uploadId) === uploadId && path.normalize(uploadId) === uploadId;
 }
 
-export async function listTasks(env: TaskCommandEnv, instanceName: string): Promise<FileWorkflowRecord[]> {
+export async function listTasks(
+  env: TaskCommandEnv,
+  instanceName: string,
+): Promise<{ tasks: FileWorkflowRecord[]; warning?: string }> {
   const store = new FileWorkflowStore(resolveTaskStateDir(env, instanceName));
-  const { state } = await store.inspect();
-  return [...state.records].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const { state, warning } = await store.inspect();
+  return {
+    tasks: [...state.records].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    warning,
+  };
 }
 
 export async function inspectTask(
@@ -70,6 +81,7 @@ export async function clearTaskWithRecovery(
   env: TaskCommandEnv,
   instanceName: string,
   uploadId: string,
+  deps: ClearTaskDeps = {},
 ): Promise<{ cleared: boolean; repaired: boolean }> {
   const stateDir = resolveTaskStateDir(env, instanceName);
   const store = new FileWorkflowStore(stateDir);
@@ -90,13 +102,26 @@ export async function clearTaskWithRecovery(
     };
   }
 
+  const removeRecord = deps.removeRecord ?? ((workflowStore, workflowUploadId) => workflowStore.remove(workflowUploadId));
+  const removeWorkspaceDir = deps.removeWorkspaceDir ?? (async (workspaceDir: string) => {
+    await rm(workspaceDir, { recursive: true, force: true });
+  });
+
+  const cleared = await removeRecord(store, uploadId);
+  if (!cleared) {
+    return {
+      cleared: false,
+      repaired: false,
+    };
+  }
+
   if (isSingleWorkspaceChildName(record.uploadId)) {
     const workspaceDir = path.resolve(resolveTaskWorkspaceDir(env, instanceName, record.uploadId));
-    await rm(workspaceDir, { recursive: true, force: true });
+    await removeWorkspaceDir(workspaceDir);
   }
 
   return {
-    cleared: await store.remove(uploadId),
+    cleared: true,
     repaired: false,
   };
 }

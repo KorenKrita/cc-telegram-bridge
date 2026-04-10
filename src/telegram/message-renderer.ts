@@ -60,7 +60,7 @@ export function renderTelegramStatusMessage(input: {
 
 export function renderCategorizedErrorMessage(category: FailureCategory, detail: string): string {
   if (category === "write-permission") {
-    return "Error: File creation is blocked by the current write policy. Reset the chat or retry in a writable mode.";
+    return "Error: File creation is blocked by the current write policy. Retry in a writable mode.";
   }
 
   if (category === "auth") {

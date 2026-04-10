@@ -159,4 +159,54 @@ describe("FileWorkflowStore", () => {
       await rm(stateDir, { recursive: true, force: true });
     }
   });
+
+  it("serializes update and remove mutations without losing records", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const store = new FileWorkflowStore(stateDir);
+
+    try {
+      await Promise.all([
+        store.append({
+          uploadId: "one",
+          chatId: 100,
+          userId: 100,
+          kind: "document",
+          status: "processing",
+          sourceFiles: ["a.txt"],
+          derivedFiles: [],
+          summary: "first",
+          createdAt: "2026-04-10T00:00:00.000Z",
+          updatedAt: "2026-04-10T00:00:00.000Z",
+        }),
+        store.append({
+          uploadId: "two",
+          chatId: 100,
+          userId: 100,
+          kind: "document",
+          status: "processing",
+          sourceFiles: ["b.txt"],
+          derivedFiles: [],
+          summary: "second",
+          createdAt: "2026-04-10T00:01:00.000Z",
+          updatedAt: "2026-04-10T00:01:00.000Z",
+        }),
+      ]);
+
+      await Promise.all([
+        store.update("one", (record) => {
+          record.status = "completed";
+          record.summary = "first updated";
+        }),
+        store.remove("two"),
+      ]);
+
+      await expect(store.find("one")).resolves.toEqual(
+        expect.objectContaining({ uploadId: "one", status: "completed", summary: "first updated" }),
+      );
+      await expect(store.find("two")).resolves.toBeNull();
+      expect((await store.list({ chatId: 100 })).map((record) => record.uploadId)).toEqual(["one"]);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
 });

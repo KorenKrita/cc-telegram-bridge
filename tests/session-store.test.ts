@@ -149,6 +149,33 @@ describe("SessionStore", () => {
     }
   });
 
+  it("removeByChatId returns true for an existing chat", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const filePath = path.join(tempDir, "session.json");
+    const store = new SessionStore(filePath);
+
+    try {
+      await store.upsert(createRecord({ telegramChatId: 100 }));
+
+      await expect(store.removeByChatId(100)).resolves.toBe(true);
+      await expect(store.findByChatId(100)).resolves.toBeNull();
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("removeByChatId returns false for a missing chat", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const filePath = path.join(tempDir, "session.json");
+    const store = new SessionStore(filePath);
+
+    try {
+      await expect(store.removeByChatId(999)).resolves.toBe(false);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("returns fresh default state when the file is missing", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const filePath = path.join(tempDir, "session.json");

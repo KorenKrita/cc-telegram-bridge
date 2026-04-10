@@ -2,6 +2,8 @@ import path from "node:path";
 
 import { JsonStore } from "./json-store.js";
 
+export const FILE_WORKFLOW_STATE_UNREADABLE_WARNING = "file workflow state unreadable";
+
 export type FileWorkflowKind = "image" | "document" | "archive";
 export type FileWorkflowStatus = "processing" | "awaiting_continue" | "completed" | "failed";
 
@@ -101,6 +103,21 @@ export class FileWorkflowStore {
     return await this.store.read(createDefaultState());
   }
 
+  async inspect(): Promise<{ state: FileWorkflowState; warning?: string }> {
+    try {
+      return { state: await this.load() };
+    } catch (error) {
+      if (isRecoverableFileWorkflowStateError(error)) {
+        return {
+          state: createDefaultState(),
+          warning: FILE_WORKFLOW_STATE_UNREADABLE_WARNING,
+        };
+      }
+
+      throw error;
+    }
+  }
+
   async append(record: FileWorkflowRecord): Promise<void> {
     await this.enqueueWrite(async () => {
       const state = await this.load();
@@ -131,6 +148,14 @@ export class FileWorkflowStore {
     return state.records.find((record) => record.uploadId === uploadId) ?? null;
   }
 
+  async findSafe(uploadId: string): Promise<{ record: FileWorkflowRecord | null; warning?: string }> {
+    const { state, warning } = await this.inspect();
+    return {
+      record: state.records.find((entry) => entry.uploadId === uploadId) ?? null,
+      warning,
+    };
+  }
+
   async remove(uploadId: string): Promise<boolean> {
     let removed = false;
 
@@ -154,6 +179,22 @@ export class FileWorkflowStore {
     });
 
     return removed;
+  }
+
+  async removeRecovering(uploadId: string): Promise<{ removed: boolean; repaired: boolean }> {
+    try {
+      return {
+        removed: await this.remove(uploadId),
+        repaired: false,
+      };
+    } catch (error) {
+      if (!isRecoverableFileWorkflowStateError(error)) {
+        throw error;
+      }
+
+      await this.reset();
+      return { removed: false, repaired: true };
+    }
   }
 
   async update(uploadId: string, mutate: (record: FileWorkflowRecord) => void): Promise<FileWorkflowRecord | null> {
@@ -191,6 +232,10 @@ export class FileWorkflowStore {
     ) ?? null;
   }
 
+  async reset(): Promise<void> {
+    await this.store.write(createDefaultState());
+  }
+
   private enqueueWrite(task: () => Promise<void>): Promise<void> {
     const run = this.pendingWrite.then(task, task);
     this.pendingWrite = run.then(
@@ -200,4 +245,8 @@ export class FileWorkflowStore {
 
     return run;
   }
+}
+
+function isRecoverableFileWorkflowStateError(error: unknown): boolean {
+  return error instanceof SyntaxError || (error instanceof Error && error.message === "invalid file workflow state");
 }

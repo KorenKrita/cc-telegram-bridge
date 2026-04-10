@@ -12,8 +12,19 @@ import {
   resolveAuditLogPath,
   type AuditEventFilter,
 } from "../state/audit-log.js";
-import { getSessionForChat, listSessions, resetSessionForChat } from "./session.js";
-import { clearTask, listTasks } from "./task.js";
+import {
+  getSessionForChat,
+  inspectSessionForChat,
+  inspectSessions,
+  resetSessionForChat,
+  SESSION_STATE_UNREADABLE_WARNING,
+} from "./session.js";
+import {
+  clearTaskWithRecovery,
+  FILE_WORKFLOW_STATE_UNREADABLE_WARNING,
+  inspectTask,
+  listTasks,
+} from "./task.js";
 import {
   getServiceLogs,
   getServiceStatus,
@@ -104,9 +115,14 @@ function parsePositiveInteger(value: string, fieldName: string): number {
 
 function formatSessionList(
   instanceName: string,
-  sessions: Awaited<ReturnType<typeof listSessions>>,
+  sessions: Awaited<ReturnType<typeof inspectSessions>>["sessions"],
+  warning?: string,
 ): string {
-  const lines = [`Instance: ${instanceName}`, `Session bindings: ${sessions.length}`];
+  const lines = [`Instance: ${instanceName}`, `Session bindings: ${warning ? "unknown" : sessions.length}`];
+
+  if (warning) {
+    lines.push(`Warning: ${warning}`);
+  }
 
   if (sessions.length === 0) {
     lines.push("Sessions: none");
@@ -146,6 +162,23 @@ function formatTaskList(instanceName: string, tasks: Awaited<ReturnType<typeof l
   }
 
   return lines.join("\n");
+}
+
+function formatTaskDetails(instanceName: string, task: Awaited<ReturnType<typeof inspectTask>>["task"] & {}): string {
+  if (!task) {
+    throw new Error("Task details require a task record.");
+  }
+
+  return [
+    `Instance: ${instanceName}`,
+    `Upload: ${task.uploadId}`,
+    `Status: ${task.status}`,
+    `Chat: ${task.chatId}`,
+    `Kind: ${task.kind}`,
+    `Source files: ${task.sourceFiles.length > 0 ? task.sourceFiles.join(", ") : "none"}`,
+    `Extracted directory: ${task.extractedPath ?? "none"}`,
+    `Detail: ${task.summary || "none"}`,
+  ].join("\n");
 }
 
 function resolveAuditStateDir(
@@ -366,7 +399,8 @@ async function runSessionCommand(argv: string[], env: InstanceTokenEnv, logger: 
       throw new Error("Usage: telegram session list [--instance <name>]");
     }
 
-    logger.log(formatSessionList(instanceName, await listSessions(env, instanceName)));
+    const result = await inspectSessions(env, instanceName);
+    logger.log(formatSessionList(instanceName, result.sessions, result.warning));
     return true;
   }
 
@@ -376,13 +410,16 @@ async function runSessionCommand(argv: string[], env: InstanceTokenEnv, logger: 
     }
 
     const chatId = parseChatId(args[0]);
-    const session = await getSessionForChat(env, instanceName, chatId);
-    if (!session) {
+    const result = await inspectSessionForChat(env, instanceName, chatId);
+    if (result.warning === SESSION_STATE_UNREADABLE_WARNING) {
+      logger.log(`Session state unreadable for instance "${instanceName}".`);
+    }
+    if (!result.session) {
       logger.log(`No session binding found for chat ${chatId} in instance "${instanceName}".`);
       return true;
     }
 
-    logger.log(formatSessionDetails(instanceName, session));
+    logger.log(formatSessionDetails(instanceName, result.session));
     return true;
   }
 
@@ -392,9 +429,11 @@ async function runSessionCommand(argv: string[], env: InstanceTokenEnv, logger: 
     }
 
     const chatId = parseChatId(args[0]);
-    const cleared = await resetSessionForChat(env, instanceName, chatId);
+    const result = await resetSessionForChat(env, instanceName, chatId);
 
-    if (cleared) {
+    if (result.repaired) {
+      logger.log(`Session state was unreadable and has been reset for instance "${instanceName}".`);
+    } else if (result.cleared) {
       logger.log(`Reset session for chat ${chatId} in instance "${instanceName}".`);
     } else {
       logger.log(`No session binding found for chat ${chatId} in instance "${instanceName}".`);
@@ -407,7 +446,7 @@ async function runSessionCommand(argv: string[], env: InstanceTokenEnv, logger: 
 
 async function runTaskCommand(argv: string[], env: InstanceTokenEnv, logger: CliLogger): Promise<boolean> {
   if (argv.length < 2) {
-    throw new Error("Usage: telegram task <list|clear> ...");
+    throw new Error("Usage: telegram task <list|inspect|clear> ...");
   }
 
   const subcommand = argv[1];
@@ -422,15 +461,38 @@ async function runTaskCommand(argv: string[], env: InstanceTokenEnv, logger: Cli
     return true;
   }
 
+  if (subcommand === "inspect") {
+    if (args.length !== 1) {
+      throw new Error("Usage: telegram task inspect [--instance <name>] <upload-id>");
+    }
+
+    const uploadId = args[0];
+    const result = await inspectTask(env, instanceName, uploadId);
+
+    if (result.warning === FILE_WORKFLOW_STATE_UNREADABLE_WARNING) {
+      logger.log(`Task state unreadable for instance "${instanceName}".`);
+    }
+
+    if (!result.task) {
+      logger.log(`No task found for "${uploadId}" in instance "${instanceName}".`);
+      return true;
+    }
+
+    logger.log(formatTaskDetails(instanceName, result.task));
+    return true;
+  }
+
   if (subcommand === "clear") {
     if (args.length !== 1) {
       throw new Error("Usage: telegram task clear [--instance <name>] <upload-id>");
     }
 
     const uploadId = args[0];
-    const cleared = await clearTask(env, instanceName, uploadId);
+    const result = await clearTaskWithRecovery(env, instanceName, uploadId);
 
-    if (cleared) {
+    if (result.repaired) {
+      logger.log(`Task state was unreadable and has been reset for instance "${instanceName}".`);
+    } else if (result.cleared) {
       logger.log(`Cleared task "${uploadId}" in instance "${instanceName}".`);
     } else {
       logger.log(`No task found for "${uploadId}" in instance "${instanceName}".`);
@@ -439,7 +501,7 @@ async function runTaskCommand(argv: string[], env: InstanceTokenEnv, logger: Cli
     return true;
   }
 
-  throw new Error("Usage: telegram task <list|clear> ...");
+  throw new Error("Usage: telegram task <list|inspect|clear> ...");
 }
 
 function formatServiceStatus(status: Awaited<ReturnType<typeof getServiceStatus>>): string {
@@ -453,7 +515,9 @@ function formatServiceStatus(status: Awaited<ReturnType<typeof getServiceStatus>
     `Paired users: ${status.pairedUsers}`,
     `Allowlist count: ${status.allowlistCount}`,
     `Pending pair count: ${status.pendingPairs}`,
-    `Session bindings: ${status.sessionBindings}`,
+    status.sessionBindingsWarning !== undefined
+      ? `Session bindings: unknown (${status.sessionBindingsWarning})`
+      : `Session bindings: ${status.sessionBindings}`,
     `Last handled update: ${status.lastHandledUpdateId ?? "none"}`,
     `Audit events: ${status.auditEvents}`,
     `Last success: ${status.lastSuccessAt ?? "none"}`,
@@ -822,6 +886,7 @@ Commands:
   session reset <chat-id> [--instance <name>]
   session <list|show> [--instance <name>]     Inspect chat-to-thread bindings
   task list [--instance <name>]               Inspect file workflow records
+  task inspect <upload-id> [--instance <name>] Inspect one file workflow record
   task clear <upload-id> [--instance <name>]  Clear a file workflow record
   audit [count] [--instance <name>] [--type <type>] [--chat <id>] [--outcome <outcome>]
                                               View audit trail

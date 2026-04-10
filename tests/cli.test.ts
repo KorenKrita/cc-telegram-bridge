@@ -260,6 +260,28 @@ describe("runCli", () => {
     }
   });
 
+  it("degrades session inspection when session state is unreadable", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      const sessionPath = path.join(tempDir, ".codex", "channels", "telegram", "alpha", "session.json");
+      await mkdir(path.dirname(sessionPath), { recursive: true });
+      await writeFile(sessionPath, "{not valid json", "utf8");
+
+      const handled = await runCli(["telegram", "session", "inspect", "--instance", "alpha", "84"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages[0]).toBe('Session state unreadable for instance "alpha".');
+      expect(messages[1]).toContain('No session binding found for chat 84 in instance "alpha".');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("clears a file workflow upload by id", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const messages: string[] = [];
@@ -321,6 +343,28 @@ describe("runCli", () => {
 
       expect(handled).toBe(true);
       expect(messages[0]).toContain('No task found for "missing-upload"');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("repairs unreadable session state during session reset", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      const sessionPath = path.join(tempDir, ".codex", "channels", "telegram", "alpha", "session.json");
+      await mkdir(path.dirname(sessionPath), { recursive: true });
+      await writeFile(sessionPath, "{not valid json", "utf8");
+
+      const handled = await runCli(["telegram", "session", "reset", "--instance", "alpha", "84"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages[0]).toContain('Session state was unreadable and has been reset for instance "alpha".');
+      expect(JSON.parse(await readFile(sessionPath, "utf8"))).toEqual({ chats: [] });
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -403,6 +447,76 @@ describe("runCli", () => {
       expect(messages[0]).toContain("Recent file workflow records: 2");
       expect(messages[0]).toContain("upload-456");
       expect(messages[0]).toContain("upload-123");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("inspects a task with source files, extracted directory, and failure detail", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      const stateDir = path.join(tempDir, ".codex", "channels", "telegram", "alpha");
+      const workflowPath = path.join(stateDir, "file-workflow.json");
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(
+        workflowPath,
+        JSON.stringify({
+          records: [
+            {
+              uploadId: "upload-123",
+              chatId: 84,
+              userId: 42,
+              kind: "archive",
+              status: "failed",
+              sourceFiles: ["repo.zip", "notes.txt"],
+              derivedFiles: [],
+              summary: "Extraction failed: archive is corrupt",
+              extractedPath: "workspace/.telegram-files/upload-123/extracted",
+              createdAt: "2026-04-08T12:00:00.000Z",
+              updatedAt: "2026-04-08T12:00:00.000Z",
+            },
+          ],
+        }) + "\n",
+        "utf8",
+      );
+
+      const handled = await runCli(["telegram", "task", "inspect", "--instance", "alpha", "upload-123"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages[0]).toContain("Upload: upload-123");
+      expect(messages[0]).toContain("Status: failed");
+      expect(messages[0]).toContain("Chat: 84");
+      expect(messages[0]).toContain("Kind: archive");
+      expect(messages[0]).toContain("Source files: repo.zip, notes.txt");
+      expect(messages[0]).toContain("Extracted directory: workspace/.telegram-files/upload-123/extracted");
+      expect(messages[0]).toContain("Detail: Extraction failed: archive is corrupt");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("repairs unreadable workflow state during task clear", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      const workflowPath = path.join(tempDir, ".codex", "channels", "telegram", "alpha", "file-workflow.json");
+      await mkdir(path.dirname(workflowPath), { recursive: true });
+      await writeFile(workflowPath, "{not valid json", "utf8");
+
+      const handled = await runCli(["telegram", "task", "clear", "--instance", "alpha", "upload-123"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages[0]).toContain('Task state was unreadable and has been reset for instance "alpha".');
+      expect(JSON.parse(await readFile(workflowPath, "utf8"))).toEqual({ records: [] });
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

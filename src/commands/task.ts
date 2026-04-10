@@ -3,7 +3,11 @@ import path from "node:path";
 
 import { resolveInstanceStateDir, type EnvSource } from "../config.js";
 import { normalizeInstanceName } from "../instance.js";
-import { FileWorkflowStore, type FileWorkflowRecord } from "../state/file-workflow-store.js";
+import {
+  FILE_WORKFLOW_STATE_UNREADABLE_WARNING,
+  FileWorkflowStore,
+  type FileWorkflowRecord,
+} from "../state/file-workflow-store.js";
 
 export interface TaskCommandEnv extends Pick<EnvSource, "HOME" | "USERPROFILE" | "CODEX_TELEGRAM_STATE_DIR"> {}
 
@@ -24,31 +28,77 @@ function resolveTaskWorkspaceRoot(env: TaskCommandEnv, instanceName: string): st
   return path.join(resolveTaskStateDir(env, instanceName), "workspace", ".telegram-files");
 }
 
-function isWithinTaskWorkspaceRoot(rootDir: string, candidateDir: string): boolean {
-  const relative = path.relative(rootDir, candidateDir);
-  return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
+function isSingleWorkspaceChildName(uploadId: string): boolean {
+  if (
+    uploadId.length === 0 ||
+    uploadId === "." ||
+    uploadId === ".." ||
+    uploadId.includes("/") ||
+    uploadId.includes("\\")
+  ) {
+    return false;
+  }
+
+  return path.basename(uploadId) === uploadId && path.normalize(uploadId) === uploadId;
 }
 
 export async function listTasks(env: TaskCommandEnv, instanceName: string): Promise<FileWorkflowRecord[]> {
   const store = new FileWorkflowStore(resolveTaskStateDir(env, instanceName));
-  return await store.list();
+  const { state } = await store.inspect();
+  return [...state.records].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function inspectTask(
+  env: TaskCommandEnv,
+  instanceName: string,
+  uploadId: string,
+): Promise<{ task: FileWorkflowRecord | null; warning?: string }> {
+  const store = new FileWorkflowStore(resolveTaskStateDir(env, instanceName));
+  const { record, warning } = await store.findSafe(uploadId);
+
+  return {
+    task: record,
+    warning,
+  };
 }
 
 export async function clearTask(env: TaskCommandEnv, instanceName: string, uploadId: string): Promise<boolean> {
+  return (await clearTaskWithRecovery(env, instanceName, uploadId)).cleared;
+}
+
+export async function clearTaskWithRecovery(
+  env: TaskCommandEnv,
+  instanceName: string,
+  uploadId: string,
+): Promise<{ cleared: boolean; repaired: boolean }> {
   const stateDir = resolveTaskStateDir(env, instanceName);
   const store = new FileWorkflowStore(stateDir);
-  const record = await store.find(uploadId);
+  const { record, warning } = await store.findSafe(uploadId);
 
-  if (!record) {
-    return false;
+  if (warning === FILE_WORKFLOW_STATE_UNREADABLE_WARNING) {
+    await store.reset();
+    return {
+      cleared: false,
+      repaired: true,
+    };
   }
 
-  const workspaceRoot = path.resolve(resolveTaskWorkspaceRoot(env, instanceName));
-  const workspaceDir = path.resolve(resolveTaskWorkspaceDir(env, instanceName, record.uploadId));
+  if (!record) {
+    return {
+      cleared: false,
+      repaired: false,
+    };
+  }
 
-  if (isWithinTaskWorkspaceRoot(workspaceRoot, workspaceDir)) {
+  if (isSingleWorkspaceChildName(record.uploadId)) {
+    const workspaceDir = path.resolve(resolveTaskWorkspaceDir(env, instanceName, record.uploadId));
     await rm(workspaceDir, { recursive: true, force: true });
   }
 
-  return await store.remove(uploadId);
+  return {
+    cleared: await store.remove(uploadId),
+    repaired: false,
+  };
 }
+
+export { FILE_WORKFLOW_STATE_UNREADABLE_WARNING };

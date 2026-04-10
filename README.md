@@ -342,6 +342,7 @@ All commands accept `--instance <name>` to target a specific bot.
 - `telegram session inspect --instance <name> <chat-id>`
 - `telegram session reset --instance <name> <chat-id>`
 - `telegram task list --instance <name>`
+- `telegram task inspect --instance <name> <upload-id>`
 - `telegram task clear --instance <name> <upload-id>`
 
 Telegram users can also use:
@@ -349,6 +350,13 @@ Telegram users can also use:
 - `/status`
 - `/reset`
 - `/help`
+
+Recovery behavior on unreadable state:
+
+- `telegram service status` and `telegram service doctor` degrade to `unknown (...)` warnings instead of crashing when `session.json` or `file-workflow.json` is unreadable.
+- `telegram session inspect` and `telegram task inspect` report unreadable state, then continue with an empty/default view.
+- `telegram session reset`, `telegram task clear`, and Telegram `/reset` repair unreadable state files back to their default empty shape before continuing.
+- Telegram `/status` shows `unknown (...)` for session/task state when the backing JSON is unreadable.
 
 ### Shell Helpers
 

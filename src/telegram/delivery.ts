@@ -226,8 +226,8 @@ export async function handleNormalizedTelegramMessage(
     }
 
     if (isResetCommand(normalized.text)) {
-      const resetMessage = renderSessionResetMessage();
-      await sessionStore.removeByChatId(normalized.chatId);
+      const resetResult = await sessionStore.removeByChatIdRecovering(normalized.chatId);
+      const resetMessage = renderSessionResetMessage(resetResult.repaired);
       await context.api.editMessage(normalized.chatId, placeholderMessageId, resetMessage);
       await appendAuditEvent(path.dirname(context.inboxDir), {
         type: "update.handle",
@@ -267,14 +267,19 @@ export async function handleNormalizedTelegramMessage(
     }
 
     if (isStatusCommand(normalized.text)) {
-      const session = await sessionStore.findByChatId(normalized.chatId);
-      const pendingTasks = (await workflowStore.list({ chatId: normalized.chatId })).filter((record) =>
-        record.status === "processing" || record.status === "awaiting_continue",
-      ).length;
+      const sessionResult = await sessionStore.findByChatIdSafe(normalized.chatId);
+      const workflowResult = await workflowStore.inspect();
+      const pendingTasks = workflowResult.warning
+        ? null
+        : workflowResult.state.records.filter((record) =>
+            record.chatId === normalized.chatId && (record.status === "processing" || record.status === "awaiting_continue"),
+          ).length;
       const statusMessage = renderTelegramStatusMessage({
         engine: await loadEngine(stateDir),
-        sessionBound: session !== null,
+        sessionBound: sessionResult.warning ? null : sessionResult.record !== null,
         pendingTasks,
+        sessionWarning: sessionResult.warning,
+        pendingTasksWarning: workflowResult.warning,
       });
       await context.api.editMessage(normalized.chatId, placeholderMessageId, statusMessage);
       await appendAuditEvent(path.dirname(context.inboxDir), {

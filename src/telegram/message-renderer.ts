@@ -22,8 +22,10 @@ export function renderErrorMessage(error: string): string {
   return `Error: ${error}`;
 }
 
-export function renderSessionResetMessage(): string {
-  return "Session reset for this chat.";
+export function renderSessionResetMessage(repaired = false): string {
+  return repaired
+    ? "Session reset. Previous session state was unreadable, so it was repaired."
+    : "Session reset for this chat.";
 }
 
 export function renderTelegramHelpMessage(): string {
@@ -37,15 +39,22 @@ export function renderTelegramHelpMessage(): string {
 
 export function renderTelegramStatusMessage(input: {
   engine: "codex" | "claude";
-  sessionBound: boolean;
-  pendingTasks: number;
+  sessionBound: boolean | null;
+  pendingTasks: number | null;
+  sessionWarning?: string;
+  pendingTasksWarning?: string;
 }): string {
-  const pendingTasks = Number.isFinite(input.pendingTasks) ? Math.max(0, Math.trunc(input.pendingTasks)) : 0;
+  const pendingTasksValue = input.pendingTasks ?? 0;
+  const pendingTasks = Number.isFinite(pendingTasksValue) ? Math.max(0, Math.trunc(pendingTasksValue)) : 0;
 
   return [
     `Engine: ${input.engine}`,
-    `Session bound: ${input.sessionBound ? "yes" : "no"}`,
-    `Pending file tasks: ${pendingTasks}`,
+    input.sessionWarning
+      ? `Session bound: unknown (${input.sessionWarning})`
+      : `Session bound: ${input.sessionBound ? "yes" : "no"}`,
+    input.pendingTasksWarning
+      ? `Pending file tasks: unknown (${input.pendingTasksWarning})`
+      : `Pending file tasks: ${pendingTasks}`,
   ].join("\n");
 }
 

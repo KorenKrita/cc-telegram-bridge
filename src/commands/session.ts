@@ -2,9 +2,15 @@ import path from "node:path";
 
 import { resolveInstanceStateDir, type EnvSource } from "../config.js";
 import { normalizeInstanceName } from "../instance.js";
-import { SessionStore } from "../state/session-store.js";
+import { SESSION_STATE_UNREADABLE_WARNING, SessionStore } from "../state/session-store.js";
 
 export interface SessionCommandEnv extends Pick<EnvSource, "HOME" | "USERPROFILE" | "CODEX_TELEGRAM_STATE_DIR"> {}
+export interface SessionSummary {
+  chatId: number;
+  threadId: string;
+  status: string;
+  updatedAt: string;
+}
 
 function resolveSessionStatePath(env: SessionCommandEnv, instanceName: string): string {
   const stateDir = resolveInstanceStateDir({
@@ -17,44 +23,76 @@ function resolveSessionStatePath(env: SessionCommandEnv, instanceName: string): 
   return path.join(stateDir, "session.json");
 }
 
-export async function listSessions(
+export async function inspectSessions(
   env: SessionCommandEnv,
   instanceName: string,
-): Promise<Array<{ chatId: number; threadId: string; status: string; updatedAt: string }>> {
+): Promise<{ sessions: SessionSummary[]; warning?: string }> {
   const store = new SessionStore(resolveSessionStatePath(env, instanceName));
-  const state = await store.load();
+  const { state, warning } = await store.inspect();
 
-  return state.chats
+  return {
+    sessions: state.chats
     .map((record) => ({
       chatId: record.telegramChatId,
       threadId: record.codexSessionId,
       status: record.status,
       updatedAt: record.updatedAt,
     }))
-    .sort((a, b) => a.chatId - b.chatId);
+    .sort((a, b) => a.chatId - b.chatId),
+    warning,
+  };
+}
+
+export async function listSessions(
+  env: SessionCommandEnv,
+  instanceName: string,
+): Promise<SessionSummary[]> {
+  return (await inspectSessions(env, instanceName)).sessions;
+}
+
+export async function inspectSessionForChat(
+  env: SessionCommandEnv,
+  instanceName: string,
+  chatId: number,
+): Promise<{ session: SessionSummary | null; warning?: string }> {
+  const store = new SessionStore(resolveSessionStatePath(env, instanceName));
+  const { record, warning } = await store.findByChatIdSafe(chatId);
+
+  if (!record) {
+    return { session: null, warning };
+  }
+
+  return {
+    session: {
+      chatId: record.telegramChatId,
+      threadId: record.codexSessionId,
+      status: record.status,
+      updatedAt: record.updatedAt,
+    },
+    warning,
+  };
 }
 
 export async function getSessionForChat(
   env: SessionCommandEnv,
   instanceName: string,
   chatId: number,
-): Promise<{ chatId: number; threadId: string; status: string; updatedAt: string } | null> {
-  const store = new SessionStore(resolveSessionStatePath(env, instanceName));
-  const record = await store.findByChatId(chatId);
+): Promise<SessionSummary | null> {
+  return (await inspectSessionForChat(env, instanceName, chatId)).session;
+}
 
-  if (!record) {
-    return null;
-  }
+export async function resetSessionForChat(
+  env: SessionCommandEnv,
+  instanceName: string,
+  chatId: number,
+): Promise<{ cleared: boolean; repaired: boolean }> {
+  const store = new SessionStore(resolveSessionStatePath(env, instanceName));
+  const result = await store.removeByChatIdRecovering(chatId);
 
   return {
-    chatId: record.telegramChatId,
-    threadId: record.codexSessionId,
-    status: record.status,
-    updatedAt: record.updatedAt,
+    cleared: result.removed,
+    repaired: result.repaired,
   };
 }
 
-export async function resetSessionForChat(env: SessionCommandEnv, instanceName: string, chatId: number): Promise<boolean> {
-  const store = new SessionStore(resolveSessionStatePath(env, instanceName));
-  return await store.removeByChatId(chatId);
-}
+export { SESSION_STATE_UNREADABLE_WARNING };

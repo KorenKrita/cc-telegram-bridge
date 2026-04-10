@@ -252,6 +252,7 @@ Add commands to inspect and clear file workflow tasks.
 Suggested commands:
 
 - `task list --instance <name>`
+- `task inspect --instance <name> <upload-id>`
 - `task clear --instance <name> <upload-id>`
 
 The operator should be able to see:
@@ -261,6 +262,13 @@ The operator should be able to see:
 - source files
 - extracted directory, if any
 - failure state, if any
+
+Recovery expectations:
+
+- task cleanup must only delete a single direct child workspace inside `.telegram-files`
+- upload ids containing separators, dot-segments, or normalization mismatches must not be used for filesystem deletion
+- clearing the workflow record should still succeed even when workspace deletion is skipped
+- unreadable `session.json` and `file-workflow.json` should degrade inspection/status flows to warnings and allow reset/clear flows to self-heal
 
 ### 4. Quick Diagnostic Logs
 
@@ -300,6 +308,11 @@ Add a small set of user-facing commands:
 - `/help`
 
 These commands should map to existing bridge concepts and not create parallel logic.
+
+When backing state is unreadable:
+
+- `/status` should report session/task state as unknown with a warning
+- `/reset` should repair unreadable session state and confirm that repair in the reply
 
 ### 2. Better Long-Task Messaging
 

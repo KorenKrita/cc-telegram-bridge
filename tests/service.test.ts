@@ -1454,6 +1454,54 @@ describe("polling helpers", () => {
     }
   });
 
+  it("degrades /status when session and workflow state are unreadable", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await writeFile(path.join(root, "session.json"), "{not valid json", "utf8");
+    await writeFile(path.join(root, "file-workflow.json"), "{not valid json", "utf8");
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      getFile: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockResolvedValue({ text: "done" }),
+    };
+
+    try {
+      await handleNormalizedTelegramMessage(
+        {
+          chatId: 123,
+          userId: 456,
+          chatType: "private",
+          text: "/status",
+          replyContext: undefined,
+          attachments: [],
+        },
+        {
+          api: api as never,
+          bridge: bridge as never,
+          inboxDir,
+        },
+      );
+
+      expect(api.editMessage).toHaveBeenLastCalledWith(
+        123,
+        11,
+        [
+          "Engine: codex",
+          "Session bound: unknown (session state unreadable)",
+          "Pending file tasks: unknown (file workflow state unreadable)",
+        ].join("\n"),
+      );
+      expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("returns help text for /help", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const inboxDir = path.join(root, "inbox");
@@ -1559,6 +1607,50 @@ describe("polling helpers", () => {
           },
         ],
       });
+      expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("repairs unreadable session state when /reset is sent", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await writeFile(path.join(root, "session.json"), "{not valid json", "utf8");
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      getFile: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockResolvedValue({ text: "done" }),
+    };
+
+    try {
+      await handleNormalizedTelegramMessage(
+        {
+          chatId: 123,
+          userId: 456,
+          chatType: "private",
+          text: "/reset",
+          replyContext: undefined,
+          attachments: [],
+        },
+        {
+          api: api as never,
+          bridge: bridge as never,
+          inboxDir,
+        },
+      );
+
+      expect(api.editMessage).toHaveBeenLastCalledWith(
+        123,
+        11,
+        "Session reset. Previous session state was unreadable, so it was repaired.",
+      );
+      expect(JSON.parse(await readFile(path.join(root, "session.json"), "utf8"))).toEqual({ chats: [] });
       expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });

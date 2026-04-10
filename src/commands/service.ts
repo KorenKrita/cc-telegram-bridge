@@ -14,6 +14,7 @@ import {
   summarizeAuditEvents,
   type AuditSummary,
 } from "../state/audit-log.js";
+import { FILE_WORKFLOW_STATE_UNREADABLE_WARNING } from "../state/file-workflow-store.js";
 import { FileWorkflowStore } from "../state/file-workflow-store.js";
 import { TelegramApi } from "../telegram/api.js";
 import {
@@ -24,7 +25,7 @@ import {
   readInstanceEngine,
   resolveEngineRuntime,
 } from "../service.js";
-import { listSessions } from "./session.js";
+import { inspectSessions as inspectSessionBindings } from "./session.js";
 
 export interface ServiceCommandEnv
   extends Pick<EnvSource, "HOME" | "USERPROFILE" | "CODEX_TELEGRAM_STATE_DIR" | "TELEGRAM_BOT_TOKEN"> {}
@@ -64,7 +65,8 @@ export interface ServiceStatus {
   pairedUsers: number;
   allowlistCount: number;
   pendingPairs: number;
-  sessionBindings: number;
+  sessionBindings: number | null;
+  sessionBindingsWarning?: string;
   lastHandledUpdateId: number | null;
   botTokenConfigured: boolean;
   botIdentity?: {
@@ -329,7 +331,7 @@ async function summarizeUnresolvedTasks(stateDir: string): Promise<{
       unresolvedTasks: null,
       blockingTasks: null,
       awaitingContinueTasks: null,
-      unresolvedTasksWarning: "file workflow state unreadable",
+      unresolvedTasksWarning: FILE_WORKFLOW_STATE_UNREADABLE_WARNING,
     };
   }
 }
@@ -467,7 +469,7 @@ export async function getServiceStatus(
   const configPath = path.join(paths.stateDir, "config.json");
   const engine = await readInstanceEngine(configPath);
   const approvalMode = await readApprovalMode(configPath);
-  const sessionBindings = (await listSessions(env, paths.instanceName)).length;
+  const sessionSummary = await inspectSessionBindings(env, paths.instanceName);
   const lastHandledUpdateId = await getLastHandledUpdateId(path.join(paths.stateDir, "inbox"));
   const readToken = deps.readConfiguredBotToken ?? readConfiguredBotToken;
   const fetchIdentity =
@@ -523,7 +525,8 @@ export async function getServiceStatus(
     pairedUsers: accessStatus.pairedUsers,
     allowlistCount: accessStatus.allowlist.length,
     pendingPairs: accessStatus.pendingPairs.length,
-    sessionBindings,
+    sessionBindings: sessionSummary.warning ? null : sessionSummary.sessions.length,
+    sessionBindingsWarning: sessionSummary.warning,
     lastHandledUpdateId,
     botTokenConfigured: botToken !== null,
     botIdentity,
@@ -576,8 +579,11 @@ export async function runServiceDoctor(
   });
   checks.push({
     name: "sessions",
-    ok: true,
-    detail: `Session bindings: ${status.sessionBindings}.`,
+    ok: status.sessionBindingsWarning === undefined,
+    detail:
+      status.sessionBindingsWarning !== undefined
+        ? `Session bindings: unknown (${status.sessionBindingsWarning}).`
+        : `Session bindings: ${status.sessionBindings}.`,
   });
   checks.push({
     name: "audit",

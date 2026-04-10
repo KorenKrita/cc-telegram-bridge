@@ -12,7 +12,8 @@ import {
   resolveAuditLogPath,
   type AuditEventFilter,
 } from "../state/audit-log.js";
-import { getSessionForChat, listSessions } from "./session.js";
+import { getSessionForChat, listSessions, resetSessionForChat } from "./session.js";
+import { clearTask, listTasks } from "./task.js";
 import {
   getServiceLogs,
   getServiceStatus,
@@ -114,6 +115,34 @@ function formatSessionList(
 
   for (const session of sessions) {
     lines.push(`- chat ${session.chatId} -> ${session.threadId} [${session.status}] @ ${session.updatedAt}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatSessionDetails(
+  instanceName: string,
+  session: NonNullable<Awaited<ReturnType<typeof getSessionForChat>>>,
+): string {
+  return [
+    `Instance: ${instanceName}`,
+    `Chat: ${session.chatId}`,
+    `Thread: ${session.threadId}`,
+    `Status: ${session.status}`,
+    `Updated: ${session.updatedAt}`,
+  ].join("\n");
+}
+
+function formatTaskList(instanceName: string, tasks: Awaited<ReturnType<typeof listTasks>>): string {
+  const lines = [`Instance: ${instanceName}`, `Recent file workflow records: ${tasks.length}`];
+
+  if (tasks.length === 0) {
+    lines.push("Tasks: none");
+    return lines.join("\n");
+  }
+
+  for (const task of tasks) {
+    lines.push(`- ${task.uploadId} [${task.status}] chat ${task.chatId} kind=${task.kind} updated ${task.updatedAt}`);
   }
 
   return lines.join("\n");
@@ -326,7 +355,7 @@ async function runAuditCommand(argv: string[], env: InstanceTokenEnv, logger: Cl
 
 async function runSessionCommand(argv: string[], env: InstanceTokenEnv, logger: CliLogger): Promise<boolean> {
   if (argv.length < 2) {
-    throw new Error("Usage: telegram session <list|show> ...");
+    throw new Error("Usage: telegram session <list|show|inspect|reset> ...");
   }
 
   const subcommand = argv[1];
@@ -341,9 +370,9 @@ async function runSessionCommand(argv: string[], env: InstanceTokenEnv, logger: 
     return true;
   }
 
-  if (subcommand === "show") {
+  if (subcommand === "show" || subcommand === "inspect") {
     if (args.length !== 1) {
-      throw new Error("Usage: telegram session show [--instance <name>] <chat-id>");
+      throw new Error(`Usage: telegram session ${subcommand} [--instance <name>] <chat-id>`);
     }
 
     const chatId = parseChatId(args[0]);
@@ -353,19 +382,64 @@ async function runSessionCommand(argv: string[], env: InstanceTokenEnv, logger: 
       return true;
     }
 
-    logger.log(
-      [
-        `Instance: ${instanceName}`,
-        `Chat: ${session.chatId}`,
-        `Thread: ${session.threadId}`,
-        `Status: ${session.status}`,
-        `Updated: ${session.updatedAt}`,
-      ].join("\n"),
-    );
+    logger.log(formatSessionDetails(instanceName, session));
     return true;
   }
 
-  throw new Error("Usage: telegram session <list|show> ...");
+  if (subcommand === "reset") {
+    if (args.length !== 1) {
+      throw new Error("Usage: telegram session reset [--instance <name>] <chat-id>");
+    }
+
+    const chatId = parseChatId(args[0]);
+    const cleared = await resetSessionForChat(env, instanceName, chatId);
+
+    if (cleared) {
+      logger.log(`Reset session for chat ${chatId} in instance "${instanceName}".`);
+    } else {
+      logger.log(`No session binding found for chat ${chatId} in instance "${instanceName}".`);
+    }
+    return true;
+  }
+
+  throw new Error("Usage: telegram session <list|show|inspect|reset> ...");
+}
+
+async function runTaskCommand(argv: string[], env: InstanceTokenEnv, logger: CliLogger): Promise<boolean> {
+  if (argv.length < 2) {
+    throw new Error("Usage: telegram task <list|clear> ...");
+  }
+
+  const subcommand = argv[1];
+  const { instanceName, args } = extractInstanceOption(argv.slice(2));
+
+  if (subcommand === "list") {
+    if (args.length !== 0) {
+      throw new Error("Usage: telegram task list [--instance <name>]");
+    }
+
+    logger.log(formatTaskList(instanceName, await listTasks(env, instanceName)));
+    return true;
+  }
+
+  if (subcommand === "clear") {
+    if (args.length !== 1) {
+      throw new Error("Usage: telegram task clear [--instance <name>] <upload-id>");
+    }
+
+    const uploadId = args[0];
+    const cleared = await clearTask(env, instanceName, uploadId);
+
+    if (cleared) {
+      logger.log(`Cleared task "${uploadId}" in instance "${instanceName}".`);
+    } else {
+      logger.log(`No task found for "${uploadId}" in instance "${instanceName}".`);
+    }
+
+    return true;
+  }
+
+  throw new Error("Usage: telegram task <list|clear> ...");
 }
 
 function formatServiceStatus(status: Awaited<ReturnType<typeof getServiceStatus>>): string {
@@ -739,7 +813,9 @@ Commands:
   access <pair|policy|allow|revoke> [--instance <name>]
                                               Manage access control
   status [--instance <name>]                  Show access policy and paired users
-  session <list|show> [--instance <name>]     Inspect chat-to-thread bindings
+  session <list|show|inspect|reset> [--instance <name>]
+                                              Inspect or reset chat-to-thread bindings
+  task <list|clear> [--instance <name>]       Inspect or clear file workflow records
   audit [count] [--instance <name>] [--type <type>] [--chat <id>] [--outcome <outcome>]
                                               View audit trail
   instructions <show|set|path> [--instance <name>]
@@ -783,6 +859,10 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   if (normalized[0] === "session") {
     return runSessionCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "task") {
+    return runTaskCommand(normalized, env, logger);
   }
 
   if (normalized[0] === "audit") {

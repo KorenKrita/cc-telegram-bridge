@@ -53,3 +53,8 @@ export async function getSessionForChat(
     updatedAt: record.updatedAt,
   };
 }
+
+export async function resetSessionForChat(env: SessionCommandEnv, instanceName: string, chatId: number): Promise<boolean> {
+  const store = new SessionStore(resolveSessionStatePath(env, instanceName));
+  return await store.removeByChatId(chatId);
+}

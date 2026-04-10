@@ -29,9 +29,24 @@ export interface AuditSummary {
 }
 
 export interface LatestFailureSummary {
-  timestamp: string;
+  timestamp?: string;
   category: FailureCategory;
   detail?: string;
+}
+
+const failureCategories = new Set<FailureCategory>([
+  "auth",
+  "write-permission",
+  "telegram-conflict",
+  "telegram-delivery",
+  "engine-cli",
+  "file-workflow",
+  "session-state",
+  "unknown",
+]);
+
+function isFailureCategory(value: unknown): value is FailureCategory {
+  return typeof value === "string" && failureCategories.has(value as FailureCategory);
 }
 
 export function resolveAuditLogPath(stateDir: string): string {
@@ -123,14 +138,18 @@ export function getLatestFailure(events: AuditEvent[]): LatestFailureSummary | u
       continue;
     }
 
-    const metadataCategory =
-      event.metadata && typeof event.metadata.failureCategory === "string" ? event.metadata.failureCategory : undefined;
-
-    return {
-      timestamp: event.timestamp ?? new Date().toISOString(),
-      category: (metadataCategory ?? classifyFailure(event.detail ?? event.type)) as FailureCategory,
+    const metadataCategory = event.metadata ? event.metadata.failureCategory : undefined;
+    const category = isFailureCategory(metadataCategory) ? metadataCategory : classifyFailure(event.detail ?? event.type);
+    const summary: LatestFailureSummary = {
+      category,
       detail: event.detail,
     };
+
+    if (event.timestamp !== undefined) {
+      summary.timestamp = event.timestamp;
+    }
+
+    return summary;
   }
 
   return undefined;

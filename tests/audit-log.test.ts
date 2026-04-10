@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { classifyFailure } from "../src/runtime/error-classification.js";
 import { appendAuditEvent, getLatestFailure, parseAuditEvents, resolveAuditLogPath } from "../src/state/audit-log.js";
 
 describe("audit log", () => {
@@ -69,6 +70,65 @@ describe("audit log", () => {
       timestamp: "2026-04-10T00:01:00.000Z",
       category: "write-permission",
       detail: "Error: write access denied",
+    });
+  });
+
+  it("classifies explicit session-state failures but not generic session runtime errors", () => {
+    expect(classifyFailure("Session store corruption detected")).toBe("session-state");
+    expect(classifyFailure("Codex runtime session failed while starting")).toBe("engine-cli");
+  });
+
+  it("falls back safely when failure metadata is invalid and preserves missing timestamps", () => {
+    const events = parseAuditEvents([
+      JSON.stringify({
+        type: "update.handle",
+        outcome: "error",
+        detail: "Error: session store unavailable",
+        metadata: { failureCategory: "not-a-category" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-09T23:59:00.000Z",
+        type: "update.handle",
+        outcome: "error",
+        detail: "Error: permission denied",
+      }),
+    ].join("\n"));
+
+    expect(getLatestFailure(events)).toEqual({
+      timestamp: "2026-04-09T23:59:00.000Z",
+      category: "write-permission",
+      detail: "Error: permission denied",
+    });
+    expect(
+      getLatestFailure(
+        parseAuditEvents(
+          JSON.stringify({
+            type: "update.handle",
+            outcome: "error",
+            detail: "Error: session store unavailable",
+            metadata: { failureCategory: "not-a-category" },
+          }),
+        ),
+      ),
+    ).toEqual({
+      category: "session-state",
+      detail: "Error: session store unavailable",
+    });
+    expect(
+      getLatestFailure(
+        parseAuditEvents(
+          JSON.stringify({
+            timestamp: "2026-04-09T23:58:00.000Z",
+            type: "update.handle",
+            outcome: "error",
+            detail: "Error: session store unavailable",
+          }),
+        ),
+      ),
+    ).toEqual({
+      timestamp: "2026-04-09T23:58:00.000Z",
+      category: "session-state",
+      detail: "Error: session store unavailable",
     });
   });
 });

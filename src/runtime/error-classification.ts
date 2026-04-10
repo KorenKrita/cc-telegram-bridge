@@ -57,6 +57,16 @@ export function classifyFailure(error: unknown): FailureCategory {
   }
 
   if (
+    text.includes("codex") ||
+    text.includes("claude") ||
+    text.includes("app-server") ||
+    text.includes("turn.failed") ||
+    text.includes("engine cli")
+  ) {
+    return "engine-cli";
+  }
+
+  if (
     text.includes("senddocument") ||
     text.includes("sendmessage") ||
     text.includes("editmessage") ||
@@ -80,18 +90,14 @@ export function classifyFailure(error: unknown): FailureCategory {
     return "file-workflow";
   }
 
-  if (text.includes("session state") || text.includes("session-state") || text.includes("session binding") || text.includes("session")) {
-    return "session-state";
-  }
-
   if (
-    text.includes("codex") ||
-    text.includes("claude") ||
-    text.includes("app-server") ||
-    text.includes("turn.failed") ||
-    text.includes("engine cli")
+    text.includes("session binding") ||
+    text.includes("session-bound") ||
+    text.includes("session store") ||
+    text.includes("session-state") ||
+    text.includes("session state")
   ) {
-    return "engine-cli";
+    return "session-state";
   }
 
   return "unknown";

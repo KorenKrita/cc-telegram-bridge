@@ -1047,6 +1047,8 @@ describe("polling helpers", () => {
       );
 
       expect(api.answerCallbackQuery).toHaveBeenCalledWith("cb-1");
+      expect(api.answerCallbackQuery.mock.invocationCallOrder[0]).toBeLessThan(api.sendMessage.mock.invocationCallOrder[0]);
+      expect(api.answerCallbackQuery.mock.invocationCallOrder[0]).toBeLessThan(api.editMessage.mock.invocationCallOrder[0]);
       expect(bridge.handleAuthorizedMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           text: expect.stringContaining("[Archive Analysis Context]"),

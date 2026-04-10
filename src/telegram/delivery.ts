@@ -190,12 +190,12 @@ export async function handleNormalizedTelegramMessage(
   const sessionStore = new SessionStore(path.join(stateDir, "session.json"));
 
   try {
-    const placeholder = await context.api.sendMessage(normalized.chatId, renderWorkingMessage());
-    placeholderMessageId = placeholder.message_id;
-    await context.api.editMessage(normalized.chatId, placeholderMessageId, renderAccessCheckMessage());
     if (normalized.callbackQueryId) {
       await context.api.answerCallbackQuery(normalized.callbackQueryId);
     }
+    const placeholder = await context.api.sendMessage(normalized.chatId, renderWorkingMessage());
+    placeholderMessageId = placeholder.message_id;
+    await context.api.editMessage(normalized.chatId, placeholderMessageId, renderAccessCheckMessage());
 
     const accessDecision = await context.bridge.checkAccess({
       chatId: normalized.chatId,

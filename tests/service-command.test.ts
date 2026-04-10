@@ -380,8 +380,72 @@ describe("telegram service commands", () => {
       });
 
       expect(handled).toBe(true);
+      expect(messages[0]).toContain("Healthy: no");
       expect(messages[0]).toContain("latest failure category: write-permission");
-      expect(messages[0]).toContain("unresolved tasks: 2");
+      expect(messages[0]).toContain("blocking tasks: 1");
+      expect(messages[0]).toContain("awaiting continue: 1");
+      expect(messages[0]).toContain("- fail tasks:");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps doctor healthy when tasks are only waiting for manual continuation", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+    const stateDir = path.join(tempDir, ".codex", "channels", "telegram", "alpha");
+    const envPath = path.join(stateDir, ".env");
+    const lockPath = resolveInstanceLockPath(stateDir);
+
+    try {
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(envPath, 'TELEGRAM_BOT_TOKEN="secret-token"\n', "utf8");
+      await writeFile(
+        lockPath,
+        JSON.stringify({
+          pid: 12345,
+          token: "token",
+          acquiredAt: new Date().toISOString(),
+        }),
+        "utf8",
+      );
+      await writeFile(
+        path.join(stateDir, "file-workflow.json"),
+        JSON.stringify({
+          records: [
+            {
+              uploadId: "archive-1",
+              chatId: 100,
+              userId: 100,
+              kind: "archive",
+              status: "awaiting_continue",
+              sourceFiles: ["repo.zip"],
+              derivedFiles: [],
+              summary: "archive summary",
+              createdAt: "2026-04-08T09:00:00.000Z",
+              updatedAt: "2026-04-08T09:00:00.000Z",
+            },
+          ],
+        }),
+        "utf8",
+      );
+
+      const handled = await runCli(["telegram", "service", "doctor", "--instance", "alpha"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+        serviceDeps: {
+          cwd: REPO_ROOT,
+          isProcessAlive: (pid) => pid === 12345,
+          isExpectedServiceProcess: (pid) => pid === 12345,
+          fetchTelegramBotIdentity: async () => ({ firstName: "Channel Bot", username: "channel_bot" }),
+        },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages[0]).toContain("Healthy: yes");
+      expect(messages[0]).toContain("blocking tasks: 0");
+      expect(messages[0]).toContain("awaiting continue: 1");
+      expect(messages[0]).toContain("- ok tasks:");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

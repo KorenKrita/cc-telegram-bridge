@@ -113,14 +113,24 @@ async function summarizeDocument(filePath: string): Promise<{ summaryText: strin
   };
 }
 
-function isContinueAnalysisCommand(text: string): { matches: boolean; extraInstructions: string } {
+function isContinueAnalysisCommand(text: string): { matches: boolean; extraInstructions: string; targetUploadId?: string } {
   const trimmed = text.trim();
-  const slashCommandPattern = /^\/continue(?:@\w+)?(?:[\s:：-]+(.*))?$/i;
+  const slashCommandPattern = /^\/continue(?:@\w+)?(?:\s+(.*))?$/i;
   const slashMatch = trimmed.match(slashCommandPattern);
   if (slashMatch) {
+    const remainder = slashMatch[1]?.trim() ?? "";
+    const targetedMatch = remainder.match(/^--upload\s+(\S+)(?:\s+(.*))?$/i);
+    if (targetedMatch) {
+      return {
+        matches: true,
+        targetUploadId: targetedMatch[1],
+        extraInstructions: targetedMatch[2]?.trim() ?? "",
+      };
+    }
+
     return {
       matches: true,
-      extraInstructions: slashMatch[1]?.trim() ?? "",
+      extraInstructions: remainder,
     };
   }
 
@@ -234,7 +244,7 @@ async function summarizeArchive(archivePath: string, extractedRoot: string): Pro
     "Tree:",
     ...treeLines,
     "",
-    "Reply \"继续分析\" to continue with this archive.",
+    "Reply \"继续分析\" or press the Continue Analysis button to continue with this archive.",
   ];
 
   return {
@@ -340,30 +350,34 @@ export async function prepareArchiveContinueWorkflow(input: {
   chatId: number;
   text: string;
 }): Promise<FileWorkflowResult | null> {
-  const { matches, extraInstructions } = isContinueAnalysisCommand(input.text);
+  const { matches, extraInstructions, targetUploadId } = isContinueAnalysisCommand(input.text);
   if (!matches) {
     return null;
   }
 
   const store = new FileWorkflowStore(input.stateDir);
-  const latest = await store.getLatestAwaitingArchive(input.chatId);
-  if (!latest) {
+  const archiveRecord = targetUploadId
+    ? await store.getAwaitingArchive(input.chatId, targetUploadId)
+    : await store.getLatestAwaitingArchive(input.chatId);
+  if (!archiveRecord) {
     return {
       kind: "reply",
-      text: "There is no archive waiting for continued analysis in this chat.",
+      text: targetUploadId
+        ? "That archive is no longer waiting for continued analysis in this chat."
+        : "There is no archive waiting for continued analysis in this chat.",
     };
   }
 
   const prompt = [
     extraInstructions || "Continue analyzing the uploaded archive.",
     "",
-    `[Archive Analysis Context]\nExtracted files live under: ${latest.extractedPath}\n\n${latest.summary}`,
+    `[Archive Analysis Context]\nExtracted files live under: ${archiveRecord.extractedPath}\n\n${archiveRecord.summary}`,
   ].join("\n");
 
   return {
     kind: "direct",
     text: prompt,
     files: [],
-    workflowRecordId: latest.uploadId,
+    workflowRecordId: archiveRecord.uploadId,
   };
 }

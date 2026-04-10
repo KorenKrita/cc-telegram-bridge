@@ -20,6 +20,15 @@ function resolveTaskWorkspaceDir(env: TaskCommandEnv, instanceName: string, uplo
   return path.join(resolveTaskStateDir(env, instanceName), "workspace", ".telegram-files", uploadId);
 }
 
+function resolveTaskWorkspaceRoot(env: TaskCommandEnv, instanceName: string): string {
+  return path.join(resolveTaskStateDir(env, instanceName), "workspace", ".telegram-files");
+}
+
+function isWithinTaskWorkspaceRoot(rootDir: string, candidateDir: string): boolean {
+  const relative = path.relative(rootDir, candidateDir);
+  return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
 export async function listTasks(env: TaskCommandEnv, instanceName: string): Promise<FileWorkflowRecord[]> {
   const store = new FileWorkflowStore(resolveTaskStateDir(env, instanceName));
   return await store.list();
@@ -34,6 +43,12 @@ export async function clearTask(env: TaskCommandEnv, instanceName: string, uploa
     return false;
   }
 
-  await rm(resolveTaskWorkspaceDir(env, instanceName, uploadId), { recursive: true, force: true });
+  const workspaceRoot = path.resolve(resolveTaskWorkspaceRoot(env, instanceName));
+  const workspaceDir = path.resolve(resolveTaskWorkspaceDir(env, instanceName, record.uploadId));
+
+  if (isWithinTaskWorkspaceRoot(workspaceRoot, workspaceDir)) {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+
   return await store.remove(uploadId);
 }

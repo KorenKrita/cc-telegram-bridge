@@ -110,9 +110,9 @@ function buildInboxFileName(attachment: NormalizedTelegramAttachment, telegramFi
   return `${attachment.fileId}${extension}`;
 }
 
-function buildContinueAnalysisKeyboard() {
+function buildContinueAnalysisKeyboard(uploadId: string) {
   return {
-    inlineKeyboard: [[{ text: "Continue Analysis", callbackData: "continue-latest-archive" }]],
+    inlineKeyboard: [[{ text: "Continue Analysis", callbackData: `continue-archive:${uploadId}` }]],
   };
 }
 
@@ -329,7 +329,9 @@ export async function handleNormalizedTelegramMessage(
         normalized.chatId,
         placeholderMessageId,
         workflowResult.text,
-        downloadedAttachments.length > 0 ? buildContinueAnalysisKeyboard() : undefined,
+        downloadedAttachments.length > 0 && workflowResult.workflowRecordId
+          ? buildContinueAnalysisKeyboard(workflowResult.workflowRecordId)
+          : undefined,
       );
       await appendAuditEvent(stateDir, {
         type: "update.handle",

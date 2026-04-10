@@ -181,6 +181,16 @@ export class FileWorkflowStore {
     return candidates.at(-1) ?? null;
   }
 
+  async getAwaitingArchive(chatId: number, uploadId: string): Promise<FileWorkflowRecord | null> {
+    const state = await this.load();
+    return state.records.find((record) =>
+      record.chatId === chatId &&
+      record.uploadId === uploadId &&
+      record.kind === "archive" &&
+      record.status === "awaiting_continue",
+    ) ?? null;
+  }
+
   private enqueueWrite(task: () => Promise<void>): Promise<void> {
     const run = this.pendingWrite.then(task, task);
     this.pendingWrite = run.then(

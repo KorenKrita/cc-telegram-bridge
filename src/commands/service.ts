@@ -78,6 +78,8 @@ export interface ServiceStatus {
   auditEvents: number;
   latestFailureCategory?: string;
   unresolvedTasks: number | null;
+  blockingTasks: number | null;
+  awaitingContinueTasks: number | null;
   unresolvedTasksWarning?: string;
 }
 
@@ -307,18 +309,26 @@ async function readLastNonEmptyLine(filePath: string): Promise<string | undefine
 
 async function summarizeUnresolvedTasks(stateDir: string): Promise<{
   unresolvedTasks: number | null;
+  blockingTasks: number | null;
+  awaitingContinueTasks: number | null;
   unresolvedTasksWarning?: string;
 }> {
   try {
     const workflowStore = new FileWorkflowStore(stateDir);
     const records = await workflowStore.list();
+    const blockingTasks = records.filter((record) => record.status === "processing" || record.status === "failed").length;
+    const awaitingContinueTasks = records.filter((record) => record.status === "awaiting_continue").length;
 
     return {
       unresolvedTasks: records.filter((record) => record.status !== "completed").length,
+      blockingTasks,
+      awaitingContinueTasks,
     };
   } catch {
     return {
       unresolvedTasks: null,
+      blockingTasks: null,
+      awaitingContinueTasks: null,
       unresolvedTasksWarning: "file workflow state unreadable",
     };
   }
@@ -524,6 +534,8 @@ export async function getServiceStatus(
     auditEvents: auditSummary.totalEvents,
     latestFailureCategory,
     unresolvedTasks: workflowSummary.unresolvedTasks,
+    blockingTasks: workflowSummary.blockingTasks,
+    awaitingContinueTasks: workflowSummary.awaitingContinueTasks,
     unresolvedTasksWarning: workflowSummary.unresolvedTasksWarning,
   };
 }
@@ -574,11 +586,11 @@ export async function runServiceDoctor(
   });
   checks.push({
     name: "tasks",
-    ok: status.unresolvedTasksWarning === undefined,
+    ok: status.unresolvedTasksWarning === undefined && (status.blockingTasks ?? 0) === 0,
     detail:
       status.unresolvedTasksWarning !== undefined
         ? `unresolved tasks: unknown (${status.unresolvedTasksWarning}).`
-        : `unresolved tasks: ${status.unresolvedTasks}.`,
+        : `unresolved tasks: ${status.unresolvedTasks}. blocking tasks: ${status.blockingTasks}. awaiting continue: ${status.awaitingContinueTasks}.`,
   });
   checks.push({
     name: "stderr",

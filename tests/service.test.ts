@@ -832,19 +832,27 @@ describe("polling helpers", () => {
       expect(api.editMessage).toHaveBeenLastCalledWith(
         123,
         11,
-        expect.stringContaining("Reply \"继续分析\" to continue with this archive."),
+        expect.stringContaining("Reply \"继续分析\" or press the Continue Analysis button to continue with this archive."),
         expect.objectContaining({
-          inlineKeyboard: [[{ text: "Continue Analysis", callbackData: "continue-latest-archive" }]],
+          inlineKeyboard: [[{ text: "Continue Analysis", callbackData: expect.stringMatching(/^continue-archive:/) }]],
         }),
       );
 
       const workflowState = JSON.parse(await readFile(path.join(root, "file-workflow.json"), "utf8")) as {
-        records: Array<{ status: string; kind: string; summary: string }>;
+        records: Array<{ uploadId: string; status: string; kind: string; summary: string }>;
       };
       expect(workflowState.records).toHaveLength(1);
       expect(workflowState.records[0]?.kind).toBe("archive");
       expect(workflowState.records[0]?.status).toBe("awaiting_continue");
       expect(workflowState.records[0]?.summary).toContain("README.md");
+      expect(api.editMessage).toHaveBeenLastCalledWith(
+        123,
+        11,
+        expect.stringContaining("press the Continue Analysis button"),
+        expect.objectContaining({
+          inlineKeyboard: [[{ text: "Continue Analysis", callbackData: `continue-archive:${workflowState.records[0]?.uploadId}` }]],
+        }),
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -887,12 +895,16 @@ describe("polling helpers", () => {
         },
       );
 
+      const workflowState = JSON.parse(await readFile(path.join(root, "file-workflow.json"), "utf8")) as {
+        records: Array<{ uploadId: string }>;
+      };
+
       expect(api.editMessage).toHaveBeenCalledWith(
         123,
         11,
         expect.stringContaining('Reply "继续分析"'),
         expect.objectContaining({
-          inlineKeyboard: [[{ text: "Continue Analysis", callbackData: "continue-latest-archive" }]],
+          inlineKeyboard: [[{ text: "Continue Analysis", callbackData: `continue-archive:${workflowState.records[0]?.uploadId}` }]],
         }),
       );
     } finally {
@@ -977,21 +989,21 @@ describe("polling helpers", () => {
     }
   });
 
-  it("maps continue-latest-archive callback queries to the /continue flow", async () => {
+  it("maps archive-specific callback queries to the targeted /continue flow", async () => {
     const normalized = normalizeUpdate({
       update_id: 99,
       callback_query: {
         id: "cb-1",
         from: { id: 456 },
         message: { message_id: 11, chat: { id: 123, type: "private" }, text: "Archive summary" },
-        data: "continue-latest-archive",
+        data: "continue-archive:archive-1",
       },
     });
 
-    expect(normalized).toEqual(expect.objectContaining({ text: "/continue" }));
+    expect(normalized).toEqual(expect.objectContaining({ text: "/continue --upload archive-1" }));
   });
 
-  it("uses the existing archive continuation flow for continue-latest-archive callbacks", async () => {
+  it("continues the archive selected by the clicked callback when multiple archives are waiting", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const inboxDir = path.join(root, "inbox");
     await writeFile(
@@ -1006,10 +1018,23 @@ describe("polling helpers", () => {
             status: "awaiting_continue",
             sourceFiles: ["repo.zip"],
             derivedFiles: [],
-            summary: "archive summary",
+            summary: "archive summary one",
             extractedPath: "workspace/.telegram-files/archive-1/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:00:00.000Z",
+          },
+          {
+            uploadId: "archive-2",
+            chatId: 123,
+            userId: 456,
+            kind: "archive",
+            status: "awaiting_continue",
+            sourceFiles: ["repo-2.zip"],
+            derivedFiles: [],
+            summary: "archive summary two",
+            extractedPath: "workspace/.telegram-files/archive-2/extracted",
+            createdAt: "2026-04-10T00:01:00.000Z",
+            updatedAt: "2026-04-10T00:01:00.000Z",
           },
         ],
       }),
@@ -1032,7 +1057,7 @@ describe("polling helpers", () => {
         id: "cb-1",
         from: { id: 456 },
         message: { message_id: 11, chat: { id: 123, type: "private" }, text: "Archive summary" },
-        data: "continue-latest-archive",
+        data: "continue-archive:archive-1",
       },
     });
 
@@ -1056,7 +1081,12 @@ describe("polling helpers", () => {
       );
       expect(bridge.handleAuthorizedMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          text: expect.stringContaining("archive summary"),
+          text: expect.stringContaining("archive summary one"),
+        }),
+      );
+      expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining("archive summary two"),
         }),
       );
       expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalledWith(

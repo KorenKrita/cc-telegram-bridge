@@ -119,6 +119,36 @@ describe("SessionStore", () => {
     }
   });
 
+  it("removes a single chat session without touching other bindings", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const filePath = path.join(tempDir, "session.json");
+    const store = new SessionStore(filePath);
+
+    try {
+      await store.upsert({
+        telegramChatId: 100,
+        codexSessionId: "thread-a",
+        status: "idle",
+        updatedAt: "2026-04-10T00:00:00.000Z",
+      });
+      await store.upsert({
+        telegramChatId: 200,
+        codexSessionId: "thread-b",
+        status: "idle",
+        updatedAt: "2026-04-10T00:00:00.000Z",
+      });
+
+      await store.removeByChatId(100);
+      const state = await store.load();
+
+      expect(state.chats).toEqual([
+        expect.objectContaining({ telegramChatId: 200, codexSessionId: "thread-b" }),
+      ]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("returns fresh default state when the file is missing", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const filePath = path.join(tempDir, "session.json");

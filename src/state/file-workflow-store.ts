@@ -23,6 +23,11 @@ interface FileWorkflowState {
   records: FileWorkflowRecord[];
 }
 
+export interface FileWorkflowListFilter {
+  chatId?: number;
+  status?: FileWorkflowStatus;
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
@@ -90,6 +95,41 @@ export class FileWorkflowStore {
     const state = await this.load();
     state.records.push(record);
     await this.store.write(state);
+  }
+
+  async list(filter: FileWorkflowListFilter = {}): Promise<FileWorkflowRecord[]> {
+    const state = await this.load();
+    const records = state.records.filter((record) => {
+      if (filter.chatId !== undefined && record.chatId !== filter.chatId) {
+        return false;
+      }
+
+      if (filter.status !== undefined && record.status !== filter.status) {
+        return false;
+      }
+
+      return true;
+    });
+
+    return [...records].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async find(uploadId: string): Promise<FileWorkflowRecord | null> {
+    const state = await this.load();
+    return state.records.find((record) => record.uploadId === uploadId) ?? null;
+  }
+
+  async remove(uploadId: string): Promise<boolean> {
+    const state = await this.load();
+    const nextRecords = state.records.filter((record) => record.uploadId !== uploadId);
+
+    if (nextRecords.length === state.records.length) {
+      return false;
+    }
+
+    state.records = nextRecords;
+    await this.store.write(state);
+    return true;
   }
 
   async update(uploadId: string, mutate: (record: FileWorkflowRecord) => void): Promise<FileWorkflowRecord | null> {

@@ -78,6 +78,31 @@ export class SessionStore {
     return state.chats.find((record) => record.telegramChatId === telegramChatId) ?? null;
   }
 
+  async removeByChatId(telegramChatId: number): Promise<boolean> {
+    let removed = false;
+
+    await this.enqueueWrite(async () => {
+      const state = await this.load();
+      const nextChats = state.chats.filter((record) => {
+        if (record.telegramChatId === telegramChatId) {
+          removed = true;
+          return false;
+        }
+
+        return true;
+      });
+
+      if (!removed) {
+        return;
+      }
+
+      state.chats = nextChats;
+      await this.store.write(state);
+    });
+
+    return removed;
+  }
+
   private enqueueWrite(task: () => Promise<void>): Promise<void> {
     const run = this.pendingWrite.then(task, task);
     this.pendingWrite = run.then(

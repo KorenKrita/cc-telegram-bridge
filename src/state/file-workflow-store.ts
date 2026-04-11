@@ -16,6 +16,7 @@ export interface FileWorkflowRecord {
   sourceFiles: string[];
   derivedFiles: string[];
   summary: string;
+  summaryMessageId?: number;
   extractedPath?: string;
   createdAt: string;
   updatedAt: string;
@@ -61,6 +62,7 @@ function isFileWorkflowRecord(value: unknown): value is FileWorkflowRecord {
     isStringArray(record.sourceFiles) &&
     isStringArray(record.derivedFiles) &&
     typeof record.summary === "string" &&
+    (record.summaryMessageId === undefined || typeof record.summaryMessageId === "number") &&
     (record.extractedPath === undefined || typeof record.extractedPath === "string") &&
     isIsoTimestamp(record.createdAt) &&
     isIsoTimestamp(record.updatedAt)
@@ -100,7 +102,15 @@ export class FileWorkflowStore {
   }
 
   async load(): Promise<FileWorkflowState> {
-    return await this.store.read(createDefaultState());
+    try {
+      return await this.store.read(createDefaultState());
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error("invalid file workflow state", { cause: error });
+      }
+
+      throw error;
+    }
   }
 
   async inspect(): Promise<{ state: FileWorkflowState; warning?: string }> {
@@ -230,6 +240,16 @@ export class FileWorkflowStore {
       record.uploadId === uploadId &&
       record.kind === "archive" &&
       record.status === "awaiting_continue",
+    ) ?? null;
+  }
+
+  async getAwaitingArchiveBySummaryMessageId(chatId: number, summaryMessageId: number): Promise<FileWorkflowRecord | null> {
+    const state = await this.load();
+    return state.records.find((record) =>
+      record.chatId === chatId &&
+      record.kind === "archive" &&
+      record.status === "awaiting_continue" &&
+      record.summaryMessageId === summaryMessageId,
     ) ?? null;
   }
 

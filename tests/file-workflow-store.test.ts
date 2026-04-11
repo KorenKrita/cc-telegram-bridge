@@ -97,6 +97,47 @@ describe("FileWorkflowStore", () => {
     }
   });
 
+  it("resolves awaiting archives by summary message id", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const store = new FileWorkflowStore(stateDir);
+
+    try {
+      await store.append({
+        uploadId: "one",
+        chatId: 100,
+        userId: 100,
+        kind: "archive",
+        status: "awaiting_continue",
+        sourceFiles: ["a.zip"],
+        derivedFiles: [],
+        summary: "first",
+        summaryMessageId: 41,
+        createdAt: "2026-04-10T00:00:00.000Z",
+        updatedAt: "2026-04-10T00:00:00.000Z",
+      });
+      await store.append({
+        uploadId: "two",
+        chatId: 100,
+        userId: 100,
+        kind: "archive",
+        status: "awaiting_continue",
+        sourceFiles: ["b.zip"],
+        derivedFiles: [],
+        summary: "second",
+        summaryMessageId: 42,
+        createdAt: "2026-04-10T00:01:00.000Z",
+        updatedAt: "2026-04-10T00:01:00.000Z",
+      });
+
+      await expect(store.getAwaitingArchiveBySummaryMessageId(100, 41)).resolves.toEqual(
+        expect.objectContaining({ uploadId: "one", summaryMessageId: 41 }),
+      );
+      await expect(store.getAwaitingArchiveBySummaryMessageId(100, 99)).resolves.toBeNull();
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects non-canonical workflow timestamps", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const store = new FileWorkflowStore(stateDir);

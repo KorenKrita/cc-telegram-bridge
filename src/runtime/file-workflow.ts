@@ -371,6 +371,10 @@ export async function prepareArchiveContinueWorkflow(input: {
   stateDir: string;
   chatId: number;
   text: string;
+  replyContext?: {
+    messageId: number;
+    text: string;
+  };
 }): Promise<FileWorkflowResult | null> {
   const { matches, extraInstructions, targetUploadId } = isContinueAnalysisCommand(input.text);
   if (!matches) {
@@ -378,9 +382,13 @@ export async function prepareArchiveContinueWorkflow(input: {
   }
 
   const store = new FileWorkflowStore(input.stateDir);
-  const archiveRecord = targetUploadId
-    ? await store.getAwaitingArchive(input.chatId, targetUploadId)
-    : await store.getLatestAwaitingArchive(input.chatId);
+  const archiveRecord =
+    targetUploadId
+      ? await store.getAwaitingArchive(input.chatId, targetUploadId)
+      : input.replyContext?.messageId
+        ? (await store.getAwaitingArchiveBySummaryMessageId(input.chatId, input.replyContext.messageId))
+          ?? (await store.getLatestAwaitingArchive(input.chatId))
+        : await store.getLatestAwaitingArchive(input.chatId);
   if (!archiveRecord) {
     return {
       kind: "reply",

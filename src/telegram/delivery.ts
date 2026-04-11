@@ -327,6 +327,7 @@ export async function handleNormalizedTelegramMessage(
             stateDir,
             chatId: normalized.chatId,
             text: normalized.text,
+            replyContext: normalized.replyContext,
           });
 
     const engine = await loadEngine(stateDir);
@@ -343,6 +344,11 @@ export async function handleNormalizedTelegramMessage(
           ? buildContinueAnalysisKeyboard(workflowResult.workflowRecordId)
           : undefined,
       );
+      if (downloadedAttachments.length > 0 && workflowResult.workflowRecordId) {
+        await workflowStore.update(workflowResult.workflowRecordId, (record) => {
+          record.summaryMessageId = placeholderMessageId;
+        });
+      }
       await appendAuditEvent(stateDir, {
         type: "update.handle",
         instanceName: context.instanceName,

@@ -24,7 +24,7 @@ export function renderErrorMessage(error: string): string {
 
 export function renderSessionResetMessage(repaired = false): string {
   return repaired
-    ? "Session reset. Previous session state was unreadable, so it was repaired."
+    ? "Session reset. Previous session state was unreadable, so all chat bindings were repaired."
     : "Session reset for this chat.";
 }
 
@@ -89,6 +89,10 @@ export function renderCategorizedErrorMessage(category: FailureCategory, detail:
 
   if (category === "file-workflow") {
     return "Error: File handling failed while preparing your request. Retry with a smaller or different file.";
+  }
+
+  if (category === "workflow-state") {
+    return "Error: Internal workflow state is unavailable right now. Reset the chat and try again.";
   }
 
   if (category === "session-state") {

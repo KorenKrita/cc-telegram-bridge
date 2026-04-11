@@ -65,6 +65,9 @@ describe("message rendering", () => {
 
   it("renders categorized error and reset messages", () => {
     expect(renderSessionResetMessage()).toBe("Session reset for this chat.");
+    expect(renderSessionResetMessage(true)).toBe(
+      "Session reset. Previous session state was unreadable, so all chat bindings were repaired.",
+    );
     expect(renderCategorizedErrorMessage("write-permission", "write access denied")).toBe(
       "Error: File creation is blocked by the current write policy. Retry in a writable mode.",
     );
@@ -82,6 +85,9 @@ describe("message rendering", () => {
     );
     expect(renderCategorizedErrorMessage("file-workflow", "archive extraction failed")).toBe(
       "Error: File handling failed while preparing your request. Retry with a smaller or different file.",
+    );
+    expect(renderCategorizedErrorMessage("workflow-state", "invalid file workflow state")).toBe(
+      "Error: Internal workflow state is unavailable right now. Reset the chat and try again.",
     );
     expect(renderCategorizedErrorMessage("session-state", "session store unavailable")).toBe(
       "Error: Session state is unavailable right now. Reset the chat and try again.",

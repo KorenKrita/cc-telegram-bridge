@@ -5,6 +5,7 @@ export type FailureCategory =
   | "telegram-delivery"
   | "engine-cli"
   | "file-workflow"
+  | "workflow-state"
   | "session-state"
   | "unknown";
 
@@ -76,6 +77,13 @@ export function classifyFailure(error: unknown): FailureCategory {
     text.includes("bad request: chat not found")
   ) {
     return "telegram-delivery";
+  }
+
+  if (
+    text.includes("invalid file workflow state") ||
+    text.includes("file workflow state unreadable")
+  ) {
+    return "workflow-state";
   }
 
   if (

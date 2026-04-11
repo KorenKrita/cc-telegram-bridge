@@ -19,6 +19,7 @@ import { normalizeUpdate } from "./telegram/update-normalizer.js";
 import { SessionManager } from "./runtime/session-manager.js";
 import { normalizeInstanceName } from "./instance.js";
 import { ChatQueue } from "./runtime/chat-queue.js";
+import { classifyFailure } from "./runtime/error-classification.js";
 
 export interface ServiceDependencies {
   api: TelegramApi;
@@ -440,6 +441,52 @@ function isConflictError(error: unknown): boolean {
   return error instanceof Error && /409\s*Conflict/i.test(error.message);
 }
 
+async function appendPollFetchFailureAuditEvent(inboxDir: string, error: unknown, offset?: number): Promise<void> {
+  await appendAuditEvent(path.dirname(inboxDir), {
+    type: "poll.fetch",
+    updateId: offset,
+    outcome: "error",
+    detail: error instanceof Error ? error.message : String(error),
+    metadata: {
+      failureCategory: classifyFailure(error),
+    },
+  });
+}
+
+async function appendPollFetchFailureAuditEventBestEffort(
+  inboxDir: string,
+  error: unknown,
+  offset?: number,
+): Promise<void> {
+  try {
+    await appendPollFetchFailureAuditEvent(inboxDir, error, offset);
+  } catch {
+    // Poll fetch failures must still back off or terminate cleanly even if audit persistence fails.
+  }
+}
+
+async function appendUpdateHandleFailureAuditEventBestEffort(
+  inboxDir: string,
+  instanceName: string | undefined,
+  error: unknown,
+  updateId?: number,
+): Promise<void> {
+  try {
+    await appendAuditEvent(path.dirname(inboxDir), {
+      type: "update.handle",
+      instanceName,
+      updateId,
+      outcome: "error",
+      detail: error instanceof Error ? error.message : String(error),
+      metadata: {
+        failureCategory: classifyFailure(error),
+      },
+    });
+  } catch {
+    // Update handling errors still need to surface and stop processing even if audit persistence fails.
+  }
+}
+
 export async function processTelegramUpdates(
   updates: unknown[],
   context: TelegramServiceContext,
@@ -512,13 +559,7 @@ export async function processTelegramUpdates(
       }
       nextOffset = advanceOffset(nextOffset, completedOffset);
     } catch (error) {
-      await appendAuditEvent(path.dirname(context.inboxDir), {
-        type: "update.handle",
-        instanceName: context.instanceName,
-        updateId,
-        outcome: "error",
-        detail: error instanceof Error ? error.message : String(error),
-      });
+      await appendUpdateHandleFailureAuditEventBestEffort(context.inboxDir, context.instanceName, error, updateId);
       logger.error(formatErrorMessage("Failed to handle Telegram update", error));
       break;
     }
@@ -560,6 +601,7 @@ export async function pollTelegramUpdatesOnce(
     }
 
     if (isConflictError(error)) {
+      await appendPollFetchFailureAuditEventBestEffort(inboxDir, error, offset);
       logger.error("409 Conflict: another process is polling this bot token. Shutting down to avoid duplicate replies.");
       return {
         offset,
@@ -569,6 +611,7 @@ export async function pollTelegramUpdatesOnce(
       };
     }
 
+    await appendPollFetchFailureAuditEventBestEffort(inboxDir, error, offset);
     logger.error(formatErrorMessage("Failed to fetch Telegram updates", error));
     return {
       offset,

@@ -628,7 +628,7 @@ it("returns help text for /help", async () => {
   expect(api.editMessage).toHaveBeenLastCalledWith(
     123,
     11,
-    expect.stringContaining("/continue"),
+    expect.stringContaining("/help"),
   );
 });
 ```
@@ -648,8 +648,6 @@ export function renderTelegramHelpMessage(): string {
     "Commands:",
     "/status - show engine and task state",
     "/reset - clear this chat session",
-    "/tasks - show recent file workflows",
-    "/continue - continue the latest archive analysis",
     "/help - show this message",
   ].join("\n");
 }
@@ -722,7 +720,7 @@ it("shows a continue-analysis shortcut button after archive summary", async () =
   expect(api.editMessage).toHaveBeenCalledWith(
     123,
     11,
-    expect.stringContaining('Reply "/continue"'),
+    expect.stringContaining("Continue Analysis"),
     expect.objectContaining({
       inlineKeyboard: [[{ text: "Continue Analysis", callbackData: "continue-latest-archive" }]],
     }),
@@ -835,15 +833,20 @@ git commit -m "feat: add minimal telegram shortcut buttons"
 - `telegram session inspect --instance <name> <chat-id>`
 - `telegram session reset --instance <name> <chat-id>`
 - `telegram task list --instance <name>`
+- `telegram task inspect --instance <name> <upload-id>`
 - `telegram task clear --instance <name> <upload-id>`
 
 Telegram users can also use:
 
 - `/status`
 - `/reset`
-- `/tasks`
-- `/continue`
 - `/help`
+
+Stable-beta remediation notes:
+
+- `task list` stays summary-only; `task inspect` is the supported detailed view for source files, extracted path, and failure/summary detail.
+- `task clear` only deletes a single direct child workspace under `.telegram-files`; hostile upload ids still clear the record but skip filesystem deletion.
+- unreadable `session.json` and `file-workflow.json` degrade status/inspect flows to warnings and let reset/clear flows self-heal to default state.
 ```
 
 - [ ] **Step 2: Run a focused sanity check**

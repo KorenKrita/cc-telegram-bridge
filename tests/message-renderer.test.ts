@@ -10,10 +10,15 @@ import {
   chunkTelegramMessage,
   renderAccessCheckMessage,
   renderAttachmentDownloadMessage,
+  renderCategorizedErrorMessage,
   renderErrorMessage,
   renderExecutionMessage,
+  renderTelegramHelpMessage,
+  renderTelegramStatusMessage,
   renderPairingMessage,
   renderPrivateChatRequiredMessage,
+  renderSessionStateErrorMessage,
+  renderSessionResetMessage,
   renderUnauthorizedMessage,
   renderWorkingMessage,
 } from "../src/telegram/message-renderer.js";
@@ -57,6 +62,95 @@ describe("message rendering", () => {
     expect(renderUnauthorizedMessage()).toBe("This chat is not authorized for this instance.");
     expect(renderPrivateChatRequiredMessage()).toBe("This bot only accepts private chats.");
     expect(renderPairingMessage("ABC123")).toBe("Pair this private chat with code ABC123");
+  });
+
+  it("renders categorized error and reset messages", () => {
+    expect(renderSessionResetMessage()).toBe("Session reset for this chat.");
+    expect(renderSessionResetMessage(true)).toBe(
+      "Session state was unreadable. An operator needs to repair the instance session state before this chat can be reset.",
+    );
+    expect(renderSessionStateErrorMessage(true)).toBe(
+      "Error: Session state is unreadable right now. The operator needs to repair session state and retry.",
+    );
+    expect(renderSessionStateErrorMessage(false)).toBe(
+      "Error: Session state is unavailable right now. The operator needs to restore read access and retry.",
+    );
+    expect(renderCategorizedErrorMessage("write-permission", "write access denied")).toBe(
+      "Error: File creation is blocked by the current write policy. Retry in a writable mode.",
+    );
+    expect(renderCategorizedErrorMessage("auth", "missing auth")).toBe(
+      "Error: Engine authentication is missing or expired. Re-login for this instance and retry.",
+    );
+    expect(renderCategorizedErrorMessage("telegram-conflict", "409 conflict")).toBe(
+      "Error: Another Telegram poller is using this bot token. Stop the duplicate service and retry.",
+    );
+    expect(renderCategorizedErrorMessage("telegram-delivery", "sendMessage failed")).toBe(
+      "Error: Telegram delivery is temporarily unavailable. Retry the request or try again later.",
+    );
+    expect(renderCategorizedErrorMessage("engine-cli", "engine failed to start")).toBe(
+      "Error: The engine runtime failed. Restart the instance and retry.",
+    );
+    expect(renderCategorizedErrorMessage("file-workflow", "archive extraction failed")).toBe(
+      "Error: File handling failed while preparing your request. Retry with a smaller or different file.",
+    );
+    expect(renderCategorizedErrorMessage("workflow-state", "invalid file workflow state")).toBe(
+      "Error: Internal workflow state is unavailable right now. Retry the request later or ask the operator to inspect the service state.",
+    );
+    expect(renderCategorizedErrorMessage("session-state", "session store unavailable")).toBe(
+      "Error: Session state is unavailable right now. The operator needs to repair session state and retry.",
+    );
+    expect(renderCategorizedErrorMessage("unknown", "boom")).toBe(
+      "Error: An unexpected failure occurred. Reset the chat or retry the request.",
+    );
+  });
+
+  it("renders Telegram help text", () => {
+    expect(renderTelegramHelpMessage()).toBe(
+      [
+        "Telegram commands:",
+        "/status - show engine, session, and file task state",
+        "Send files directly to analyze them in chat.",
+        "Archives pause after summary; reply \"继续分析\" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.",
+        "/continue - resume the latest waiting archive",
+        "/reset - clear the current chat session",
+        "/help - show this help",
+      ].join("\n"),
+    );
+  });
+
+  it("renders Telegram status text", () => {
+    expect(
+      renderTelegramStatusMessage({
+        engine: "codex",
+        sessionBound: true,
+        blockingTasks: 2,
+        waitingTasks: 1,
+      }),
+    ).toContain("Engine: codex");
+    expect(
+      renderTelegramStatusMessage({
+        engine: "codex",
+        sessionBound: true,
+        blockingTasks: 2,
+        waitingTasks: 1,
+      }),
+    ).toContain("Session bound: yes");
+    expect(
+      renderTelegramStatusMessage({
+        engine: "codex",
+        sessionBound: true,
+        blockingTasks: 2,
+        waitingTasks: 1,
+      }),
+    ).toContain("Blocking file tasks: 2");
+    expect(
+      renderTelegramStatusMessage({
+        engine: "codex",
+        sessionBound: true,
+        blockingTasks: 2,
+        waitingTasks: 1,
+      }),
+    ).toContain("Waiting file tasks: 1");
   });
 });
 

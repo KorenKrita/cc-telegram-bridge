@@ -21,21 +21,38 @@ export interface FileWorkflowDirectResult {
   text: string;
   files: string[];
   workflowRecordId?: string;
+  failureHint?: string;
+  suppressReplyContext?: boolean;
 }
 
 export interface FileWorkflowReplyResult {
   kind: "reply";
   text: string;
   workflowRecordId?: string;
+  failureHint?: string;
 }
 
 export type FileWorkflowResult = FileWorkflowDirectResult | FileWorkflowReplyResult;
+
+export class FileWorkflowPreparationError extends Error {
+  readonly workflowRecordId: string;
+
+  constructor(workflowRecordId: string, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "FileWorkflowPreparationError";
+    this.workflowRecordId = workflowRecordId;
+    this.cause = cause;
+  }
+}
 
 const TEXT_DOCUMENT_EXTENSIONS = new Set([".txt", ".md"]);
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const ARCHIVE_EXTENSIONS = new Set([".zip"]);
 const MAX_DOCUMENT_TEXT_CHARS = 12_000;
 const MAX_TREE_LINES = 40;
+const ARCHIVE_CONTINUE_HINT = 'Reply "继续分析" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.';
+const TARGETED_ARCHIVE_RETRY_HINT = 'Retry this specific archive from its original summary: press Continue Analysis again there or reply "继续分析" to that summary.';
+const MAX_ARCHIVE_SUMMARY_DELIVERY_CHARS = 3900;
 
 function resolveWorkspaceUploadsDir(stateDir: string): string {
   return path.join(stateDir, "workspace", ".telegram-files");
@@ -113,8 +130,40 @@ async function summarizeDocument(filePath: string): Promise<{ summaryText: strin
   };
 }
 
-function isContinueAnalysisCommand(text: string): { matches: boolean; extraInstructions: string } {
+function isContinueAnalysisCommand(text: string): {
+  matches: boolean;
+  extraInstructions: string;
+  targetUploadId?: string;
+  malformedTarget?: boolean;
+} {
   const trimmed = text.trim();
+  const slashCommandPattern = /^\/continue(?:@\w+)?(?:\s+(.*))?$/i;
+  const slashMatch = trimmed.match(slashCommandPattern);
+  if (slashMatch) {
+    const remainder = slashMatch[1]?.trim() ?? "";
+    const targetedMatch = remainder.match(/^--upload\s+(\S+)(?:\s+(.*))?$/i);
+    if (targetedMatch) {
+      return {
+        matches: true,
+        targetUploadId: targetedMatch[1],
+        extraInstructions: targetedMatch[2]?.trim() ?? "",
+      };
+    }
+
+    if (/^--upload(?:\s|$)/i.test(remainder)) {
+      return {
+        matches: true,
+        extraInstructions: "",
+        malformedTarget: true,
+      };
+    }
+
+    return {
+      matches: true,
+      extraInstructions: remainder,
+    };
+  }
+
   const pattern = /^(继续分析|分析这个|继续|分析压缩包)(?:[\s:：-]+(.*))?$/i;
   const match = trimmed.match(pattern);
   if (!match) {
@@ -139,7 +188,8 @@ async function extractArchiveToDirectory(archivePath: string, targetDir: string)
     }
 
     const destinationPath = path.resolve(targetRoot, normalizedEntryPath);
-    if (!destinationPath.startsWith(targetRoot)) {
+    const relativeDestination = path.relative(targetRoot, destinationPath);
+    if (relativeDestination === "" || relativeDestination.startsWith("..") || path.isAbsolute(relativeDestination)) {
       throw new Error(`Archive entry escapes target directory: ${entry.entryName}`);
     }
 
@@ -225,13 +275,41 @@ async function summarizeArchive(archivePath: string, extractedRoot: string): Pro
     "Tree:",
     ...treeLines,
     "",
-    "Reply \"继续分析\" to continue with this archive.",
+    ARCHIVE_CONTINUE_HINT,
   ];
 
   return {
     summary: summaryLines.join("\n"),
     topExtensions,
   };
+}
+
+export function boundArchiveSummaryForTelegram(
+  summary: string,
+  limit = MAX_ARCHIVE_SUMMARY_DELIVERY_CHARS,
+): string {
+  if (summary.length <= limit) {
+    return summary;
+  }
+
+  const truncationNotice = "[Archive summary truncated for Telegram delivery.]";
+  const suffix = `\n\n${truncationNotice}\n${ARCHIVE_CONTINUE_HINT}`;
+  const prefixLimit = limit - suffix.length;
+
+  if (prefixLimit <= 0) {
+    return suffix.slice(suffix.length - limit);
+  }
+
+  return `${summary.slice(0, prefixLimit).trimEnd()}${suffix}`;
+}
+
+function createArchiveFailureSummary(archivePath: string, extractedRoot: string, error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  return [
+    `Archive summary failed: ${path.basename(archivePath)}`,
+    `Extract path: ${extractedRoot}`,
+    `Failure: ${detail}`,
+  ].join("\n");
 }
 
 export async function prepareAttachmentWorkflow(input: {
@@ -254,26 +332,44 @@ export async function prepareAttachmentWorkflow(input: {
 
   if (uniqueKinds.length === 1 && uniqueKinds[0] === "archive" && stagedFiles.length === 1) {
     const extractedRoot = path.join(resolveWorkspaceUploadsDir(input.stateDir), uploadId, "extracted");
-    const { summary } = await summarizeArchive(stagedFiles[0]!, extractedRoot);
     const record: FileWorkflowRecord = {
       uploadId,
       chatId: input.chatId,
       userId: input.userId,
       kind: "archive",
-      status: "awaiting_continue",
+      status: "preparing",
       sourceFiles: stagedFiles,
       derivedFiles: [],
-      summary,
+      summary: `Preparing archive summary for ${path.basename(stagedFiles[0]!)}`,
       extractedPath: extractedRoot,
       createdAt: now,
       updatedAt: now,
     };
     await store.append(record);
-    return {
-      kind: "reply",
-      text: summary,
-      workflowRecordId: uploadId,
-    };
+
+    try {
+      const { summary } = await summarizeArchive(stagedFiles[0]!, extractedRoot);
+      await store.update(uploadId, (current) => {
+        current.status = "awaiting_continue";
+        current.summary = summary;
+      });
+      return {
+        kind: "reply",
+        text: summary,
+        workflowRecordId: uploadId,
+      };
+    } catch (error) {
+      try {
+        await store.update(uploadId, (current) => {
+          current.status = "failed";
+          current.summary = createArchiveFailureSummary(stagedFiles[0]!, extractedRoot, error);
+        });
+      } catch {
+        throw new FileWorkflowPreparationError(uploadId, error);
+      }
+
+      throw new FileWorkflowPreparationError(uploadId, error);
+    }
   }
 
   const documentSections: string[] = [];
@@ -330,31 +426,74 @@ export async function prepareArchiveContinueWorkflow(input: {
   stateDir: string;
   chatId: number;
   text: string;
+  replyContext?: {
+    messageId: number;
+    text: string;
+  };
 }): Promise<FileWorkflowResult | null> {
-  const { matches, extraInstructions } = isContinueAnalysisCommand(input.text);
+  const { matches, extraInstructions, targetUploadId, malformedTarget } = isContinueAnalysisCommand(input.text);
   if (!matches) {
     return null;
   }
 
-  const store = new FileWorkflowStore(input.stateDir);
-  const latest = await store.getLatestAwaitingArchive(input.chatId);
-  if (!latest) {
+  if (malformedTarget) {
     return {
       kind: "reply",
-      text: "There is no archive waiting for continued analysis in this chat.",
+      text: 'Malformed continue command. Use /continue, the Continue Analysis button, or reply "继续分析" to the archive summary.',
+    };
+  }
+
+  const store = new FileWorkflowStore(input.stateDir);
+  const hasReplyTarget = targetUploadId === undefined && input.replyContext?.messageId !== undefined;
+  const explicitTarget = targetUploadId !== undefined || hasReplyTarget;
+  const archiveRecord = await store.beginArchiveContinuation({
+    chatId: input.chatId,
+    uploadId: targetUploadId,
+    summaryMessageId: targetUploadId ? undefined : input.replyContext?.messageId,
+  });
+  if (!archiveRecord) {
+    if (explicitTarget) {
+      const targetedRecord = await store.getArchiveContinuationTarget({
+        chatId: input.chatId,
+        uploadId: targetUploadId,
+        summaryMessageId: targetUploadId ? undefined : input.replyContext?.messageId,
+      });
+
+      if (targetedRecord?.status === "processing") {
+        return {
+          kind: "reply",
+          text: "That archive is already being processed in this chat.",
+        };
+      }
+
+      if (targetedRecord?.status === "completed") {
+        return {
+          kind: "reply",
+          text: "That archive has already completed continued analysis in this chat.",
+        };
+      }
+    }
+
+    return {
+      kind: "reply",
+      text: explicitTarget
+        ? "That archive is no longer waiting for continued analysis in this chat."
+        : "There is no archive waiting for continued analysis in this chat.",
     };
   }
 
   const prompt = [
     extraInstructions || "Continue analyzing the uploaded archive.",
     "",
-    `[Archive Analysis Context]\nExtracted files live under: ${latest.extractedPath}\n\n${latest.summary}`,
+    `[Archive Analysis Context]\nExtracted files live under: ${archiveRecord.extractedPath}\n\n${archiveRecord.summary}`,
   ].join("\n");
 
   return {
     kind: "direct",
     text: prompt,
     files: [],
-    workflowRecordId: latest.uploadId,
+    workflowRecordId: archiveRecord.uploadId,
+    failureHint: explicitTarget ? TARGETED_ARCHIVE_RETRY_HINT : undefined,
+    suppressReplyContext: input.replyContext?.messageId !== undefined,
   };
 }

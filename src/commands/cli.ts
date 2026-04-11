@@ -12,7 +12,19 @@ import {
   resolveAuditLogPath,
   type AuditEventFilter,
 } from "../state/audit-log.js";
-import { getSessionForChat, listSessions } from "./session.js";
+import {
+  getSessionForChat,
+  inspectSessionForChat,
+  inspectSessions,
+  resetSessionForChat,
+  SESSION_STATE_UNREADABLE_WARNING,
+} from "./session.js";
+import {
+  clearTaskWithRecovery,
+  FILE_WORKFLOW_STATE_UNREADABLE_WARNING,
+  inspectTask,
+  listTasks,
+} from "./task.js";
 import {
   getServiceLogs,
   getServiceStatus,
@@ -103,9 +115,15 @@ function parsePositiveInteger(value: string, fieldName: string): number {
 
 function formatSessionList(
   instanceName: string,
-  sessions: Awaited<ReturnType<typeof listSessions>>,
+  sessions: Awaited<ReturnType<typeof inspectSessions>>["sessions"],
+  warning?: string,
 ): string {
-  const lines = [`Instance: ${instanceName}`, `Session bindings: ${sessions.length}`];
+  const lines = [`Instance: ${instanceName}`, `Session bindings: ${warning ? "unknown" : sessions.length}`];
+
+  if (warning) {
+    lines.push(`Warning: ${warning}`);
+    return lines.join("\n");
+  }
 
   if (sessions.length === 0) {
     lines.push("Sessions: none");
@@ -117,6 +135,59 @@ function formatSessionList(
   }
 
   return lines.join("\n");
+}
+
+function formatSessionDetails(
+  instanceName: string,
+  session: NonNullable<Awaited<ReturnType<typeof getSessionForChat>>>,
+): string {
+  return [
+    `Instance: ${instanceName}`,
+    `Chat: ${session.chatId}`,
+    `Thread: ${session.threadId}`,
+    `Status: ${session.status}`,
+    `Updated: ${session.updatedAt}`,
+  ].join("\n");
+}
+
+function formatTaskList(instanceName: string, result: Awaited<ReturnType<typeof listTasks>>): string {
+  const lines = [
+    `Instance: ${instanceName}`,
+    `Recent file workflow records: ${result.warning ? "unknown" : result.tasks.length}`,
+  ];
+
+  if (result.warning) {
+    lines.push(`Warning: ${result.warning}`);
+    return lines.join("\n");
+  }
+
+  if (result.tasks.length === 0) {
+    lines.push("Tasks: none");
+    return lines.join("\n");
+  }
+
+  for (const task of result.tasks) {
+    lines.push(`- ${task.uploadId} [${task.status}] chat ${task.chatId} kind=${task.kind} updated ${task.updatedAt}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatTaskDetails(instanceName: string, task: Awaited<ReturnType<typeof inspectTask>>["task"] & {}): string {
+  if (!task) {
+    throw new Error("Task details require a task record.");
+  }
+
+  return [
+    `Instance: ${instanceName}`,
+    `Upload: ${task.uploadId}`,
+    `Status: ${task.status}`,
+    `Chat: ${task.chatId}`,
+    `Kind: ${task.kind}`,
+    `Source files: ${task.sourceFiles.length > 0 ? task.sourceFiles.join(", ") : "none"}`,
+    `Extracted directory: ${task.extractedPath ?? "none"}`,
+    `Detail: ${task.summary || "none"}`,
+  ].join("\n");
 }
 
 function resolveAuditStateDir(
@@ -326,7 +397,7 @@ async function runAuditCommand(argv: string[], env: InstanceTokenEnv, logger: Cl
 
 async function runSessionCommand(argv: string[], env: InstanceTokenEnv, logger: CliLogger): Promise<boolean> {
   if (argv.length < 2) {
-    throw new Error("Usage: telegram session <list|show> ...");
+    throw new Error("Usage: telegram session <list|inspect|reset> ...");
   }
 
   const subcommand = argv[1];
@@ -337,35 +408,116 @@ async function runSessionCommand(argv: string[], env: InstanceTokenEnv, logger: 
       throw new Error("Usage: telegram session list [--instance <name>]");
     }
 
-    logger.log(formatSessionList(instanceName, await listSessions(env, instanceName)));
+    const result = await inspectSessions(env, instanceName);
+    logger.log(formatSessionList(instanceName, result.sessions, result.warning));
     return true;
   }
 
-  if (subcommand === "show") {
+  if (subcommand === "show" || subcommand === "inspect") {
     if (args.length !== 1) {
-      throw new Error("Usage: telegram session show [--instance <name>] <chat-id>");
+      throw new Error(`Usage: telegram session ${subcommand} [--instance <name>] <chat-id>`);
     }
 
     const chatId = parseChatId(args[0]);
-    const session = await getSessionForChat(env, instanceName, chatId);
-    if (!session) {
+    const result = await inspectSessionForChat(env, instanceName, chatId);
+    if (result.warning === SESSION_STATE_UNREADABLE_WARNING) {
+      logger.log(`Session state unreadable for instance "${instanceName}".`);
+      return true;
+    }
+    if (!result.session) {
       logger.log(`No session binding found for chat ${chatId} in instance "${instanceName}".`);
       return true;
     }
 
-    logger.log(
-      [
-        `Instance: ${instanceName}`,
-        `Chat: ${session.chatId}`,
-        `Thread: ${session.threadId}`,
-        `Status: ${session.status}`,
-        `Updated: ${session.updatedAt}`,
-      ].join("\n"),
-    );
+    logger.log(formatSessionDetails(instanceName, result.session));
     return true;
   }
 
-  throw new Error("Usage: telegram session <list|show> ...");
+  if (subcommand === "reset") {
+    if (args.length !== 1) {
+      throw new Error("Usage: telegram session reset [--instance <name>] <chat-id>");
+    }
+
+    const chatId = parseChatId(args[0]);
+    const result = await resetSessionForChat(env, instanceName, chatId);
+
+    if (result.repaired) {
+      logger.log(`Session state was unreadable and has been reset for instance "${instanceName}".`);
+    } else if (result.cleared) {
+      logger.log(`Reset session for chat ${chatId} in instance "${instanceName}".`);
+    } else {
+      logger.log(`No session binding found for chat ${chatId} in instance "${instanceName}".`);
+    }
+    return true;
+  }
+
+  throw new Error("Usage: telegram session <list|inspect|reset> ...");
+}
+
+async function runTaskCommand(argv: string[], env: InstanceTokenEnv, logger: CliLogger): Promise<boolean> {
+  if (argv.length < 2) {
+    throw new Error("Usage: telegram task <list|inspect|clear> ...");
+  }
+
+  const subcommand = argv[1];
+  const { instanceName, args } = extractInstanceOption(argv.slice(2));
+
+  if (subcommand === "list") {
+    if (args.length !== 0) {
+      throw new Error("Usage: telegram task list [--instance <name>]");
+    }
+
+    const result = await listTasks(env, instanceName);
+    logger.log(formatTaskList(instanceName, result));
+    return true;
+  }
+
+  if (subcommand === "inspect") {
+    if (args.length !== 1) {
+      throw new Error("Usage: telegram task inspect [--instance <name>] <upload-id>");
+    }
+
+    const uploadId = args[0];
+    const result = await inspectTask(env, instanceName, uploadId);
+
+    if (result.warning === FILE_WORKFLOW_STATE_UNREADABLE_WARNING) {
+      logger.log(`Task state unreadable for instance "${instanceName}".`);
+      return true;
+    }
+
+    if (!result.task) {
+      logger.log(`No task found for "${uploadId}" in instance "${instanceName}".`);
+      return true;
+    }
+
+    logger.log(formatTaskDetails(instanceName, result.task));
+    return true;
+  }
+
+  if (subcommand === "clear") {
+    if (args.length !== 1) {
+      throw new Error("Usage: telegram task clear [--instance <name>] <upload-id>");
+    }
+
+    const uploadId = args[0];
+    const result = await clearTaskWithRecovery(env, instanceName, uploadId);
+
+    if (result.repaired) {
+      logger.log(`Task state was unreadable and has been reset for instance "${instanceName}".`);
+    } else if (result.cleared) {
+      logger.log(
+        result.cleanupWarning
+          ? `Cleared task "${uploadId}" in instance "${instanceName}". Warning: ${result.cleanupWarning}`
+          : `Cleared task "${uploadId}" in instance "${instanceName}".`,
+      );
+    } else {
+      logger.log(`No task found for "${uploadId}" in instance "${instanceName}".`);
+    }
+
+    return true;
+  }
+
+  throw new Error("Usage: telegram task <list|inspect|clear> ...");
 }
 
 function formatServiceStatus(status: Awaited<ReturnType<typeof getServiceStatus>>): string {
@@ -379,11 +531,22 @@ function formatServiceStatus(status: Awaited<ReturnType<typeof getServiceStatus>
     `Paired users: ${status.pairedUsers}`,
     `Allowlist count: ${status.allowlistCount}`,
     `Pending pair count: ${status.pendingPairs}`,
-    `Session bindings: ${status.sessionBindings}`,
+    status.sessionBindingsWarning !== undefined
+      ? `Session bindings: unknown (${status.sessionBindingsWarning})`
+      : `Session bindings: ${status.sessionBindings}`,
     `Last handled update: ${status.lastHandledUpdateId ?? "none"}`,
     `Audit events: ${status.auditEvents}`,
     `Last success: ${status.lastSuccessAt ?? "none"}`,
     `Last failure: ${status.lastFailureAt ?? "none"}`,
+    status.unresolvedTasksWarning !== undefined
+      ? `Unresolved tasks: unknown (${status.unresolvedTasksWarning})`
+      : `Unresolved tasks: ${status.unresolvedTasks}`,
+    status.unresolvedTasksWarning !== undefined
+      ? `Blocking tasks: unknown (${status.unresolvedTasksWarning})`
+      : `Blocking tasks: ${status.blockingTasks}`,
+    status.unresolvedTasksWarning !== undefined
+      ? `Awaiting continue tasks: unknown (${status.unresolvedTasksWarning})`
+      : `Awaiting continue tasks: ${status.awaitingContinueTasks}`,
     `State dir: ${status.stateDir}`,
     `Stdout log: ${status.stdoutPath}`,
     `Stderr log: ${status.stderrPath}`,
@@ -408,10 +571,14 @@ function formatServiceStatus(status: Awaited<ReturnType<typeof getServiceStatus>
 }
 
 function formatServiceDoctor(result: Awaited<ReturnType<typeof runServiceDoctor>>): string {
+  const checkLines = result.checks.map((check) => `- ${check.ok ? "ok" : "fail"} ${check.name}: ${check.detail}`);
+
   return [
     `Instance: ${result.instanceName}`,
+    `Engine: ${result.engine}`,
+    `Runtime: ${result.runtime}`,
     `Healthy: ${result.healthy ? "yes" : "no"}`,
-    ...result.checks.map((check) => `- ${check.ok ? "ok" : "fail"} ${check.name}: ${check.detail}`),
+    ...checkLines,
   ].join("\n");
 }
 
@@ -739,7 +906,12 @@ Commands:
   access <pair|policy|allow|revoke> [--instance <name>]
                                               Manage access control
   status [--instance <name>]                  Show access policy and paired users
-  session <list|show> [--instance <name>]     Inspect chat-to-thread bindings
+  session list [--instance <name>]            Inspect chat-to-thread bindings
+  session inspect [--instance <name>] <chat-id>
+  session reset [--instance <name>] <chat-id>
+  task list [--instance <name>]               Inspect file workflow records
+  task inspect [--instance <name>] <upload-id> Inspect one file workflow record
+  task clear [--instance <name>] <upload-id>  Clear a file workflow record
   audit [count] [--instance <name>] [--type <type>] [--chat <id>] [--outcome <outcome>]
                                               View audit trail
   instructions <show|set|path> [--instance <name>]
@@ -783,6 +955,10 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   if (normalized[0] === "session") {
     return runSessionCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "task") {
+    return runTaskCommand(normalized, env, logger);
   }
 
   if (normalized[0] === "audit") {

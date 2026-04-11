@@ -336,6 +336,32 @@ Telegram Update → Normalize → Access Check → Chat Queue (serialized)
 
 All commands accept `--instance <name>` to target a specific bot.
 
+## Stable Beta Commands
+
+- `telegram service doctor --instance <name>`
+- `telegram session list --instance <name>`
+- `telegram session inspect --instance <name> <chat-id>`
+- `telegram session reset --instance <name> <chat-id>`
+- `telegram task list --instance <name>`
+- `telegram task inspect --instance <name> <upload-id>`
+- `telegram task clear --instance <name> <upload-id>`
+
+Telegram users can also use:
+
+- `/status`
+- `/continue`
+- `/reset`
+- `/help`
+
+For archive summaries, the intended continuation path is to reply to that summary or press its Continue Analysis button; bare `/continue` only resumes the latest waiting archive.
+
+Recovery behavior on unreadable state:
+
+- `telegram service status` and `telegram service doctor` degrade to `unknown (...)` warnings instead of crashing when `session.json` or `file-workflow.json` is unreadable.
+- `telegram session inspect` and `telegram task inspect` report unreadable state and stop instead of pretending the record is missing.
+- `telegram session reset`, `telegram task clear`, and Telegram `/reset` only self-heal corruption/schema-invalid state. Before writing a default empty file, the unreadable original is quarantined as a backup beside the state file.
+- Telegram `/status` shows `unknown (...)` for session/task state when the backing JSON is unreadable.
+
 ### Shell Helpers
 
 **Windows (PowerShell):**
@@ -366,15 +392,6 @@ npm run dev -- telegram access policy allowlist
 npm run dev -- telegram access allow <chat-id>
 npm run dev -- telegram access revoke <chat-id>
 npm run dev -- telegram status [--instance work]
-```
-
----
-
-## Session Inspection
-
-```bash
-npm run dev -- telegram session list [--instance work]
-npm run dev -- telegram session show [--instance work] <chat-id>
 ```
 
 ---
@@ -453,7 +470,7 @@ Mount `~/.codex` to persist state across container restarts.
 <details>
 <summary><strong>Bot does not reply</strong></summary>
 
-1. Run `telegram service doctor` to diagnose
+1. Run `telegram service doctor --instance <name>` to diagnose
 2. Check `telegram service logs` for errors
 3. Verify the engine is installed: `codex --version` or `claude --version`
 

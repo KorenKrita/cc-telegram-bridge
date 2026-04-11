@@ -7,7 +7,15 @@ import { resolveInstanceStateDir, type EnvSource } from "../config.js";
 import { normalizeInstanceName } from "../instance.js";
 import { resolveInstanceLockPath, type InstanceLockRecord } from "../state/instance-lock.js";
 import { AccessStore } from "../state/access-store.js";
-import { parseAuditEvents, resolveAuditLogPath, summarizeAuditEvents, type AuditSummary } from "../state/audit-log.js";
+import {
+  getLatestFailure,
+  parseAuditEvents,
+  resolveAuditLogPath,
+  summarizeAuditEvents,
+  type AuditSummary,
+} from "../state/audit-log.js";
+import { FILE_WORKFLOW_STATE_UNREADABLE_WARNING } from "../state/file-workflow-store.js";
+import { FileWorkflowStore } from "../state/file-workflow-store.js";
 import { TelegramApi } from "../telegram/api.js";
 import {
   getLastHandledUpdateId,
@@ -17,7 +25,7 @@ import {
   readInstanceEngine,
   resolveEngineRuntime,
 } from "../service.js";
-import { listSessions } from "./session.js";
+import { inspectSessions as inspectSessionBindings } from "./session.js";
 
 export interface ServiceCommandEnv
   extends Pick<EnvSource, "HOME" | "USERPROFILE" | "CODEX_TELEGRAM_STATE_DIR" | "TELEGRAM_BOT_TOKEN"> {}
@@ -57,7 +65,8 @@ export interface ServiceStatus {
   pairedUsers: number;
   allowlistCount: number;
   pendingPairs: number;
-  sessionBindings: number;
+  sessionBindings: number | null;
+  sessionBindingsWarning?: string;
   lastHandledUpdateId: number | null;
   botTokenConfigured: boolean;
   botIdentity?: {
@@ -69,10 +78,17 @@ export interface ServiceStatus {
   lastSuccessAt?: string;
   lastFailureAt?: string;
   auditEvents: number;
+  latestFailureCategory?: string;
+  unresolvedTasks: number | null;
+  blockingTasks: number | null;
+  awaitingContinueTasks: number | null;
+  unresolvedTasksWarning?: string;
 }
 
 export interface ServiceDoctorResult {
   instanceName: string;
+  engine: string;
+  runtime: string;
   healthy: boolean;
   checks: Array<{
     name: string;
@@ -80,6 +96,8 @@ export interface ServiceDoctorResult {
     detail: string;
   }>;
 }
+
+const BLOCKING_WORKFLOW_STATUSES = new Set(["preparing", "processing", "failed"]);
 
 function defaultIsProcessAlive(pid: number): boolean {
   try {
@@ -295,6 +313,33 @@ async function readLastNonEmptyLine(filePath: string): Promise<string | undefine
   }
 }
 
+async function summarizeUnresolvedTasks(stateDir: string): Promise<{
+  unresolvedTasks: number | null;
+  blockingTasks: number | null;
+  awaitingContinueTasks: number | null;
+  unresolvedTasksWarning?: string;
+}> {
+  const workflowStore = new FileWorkflowStore(stateDir);
+  const { state, warning } = await workflowStore.inspect();
+  if (warning) {
+    return {
+      unresolvedTasks: null,
+      blockingTasks: null,
+      awaitingContinueTasks: null,
+      unresolvedTasksWarning: FILE_WORKFLOW_STATE_UNREADABLE_WARNING,
+    };
+  }
+
+  const blockingTasks = state.records.filter((record) => BLOCKING_WORKFLOW_STATUSES.has(record.status)).length;
+  const awaitingContinueTasks = state.records.filter((record) => record.status === "awaiting_continue").length;
+
+  return {
+    unresolvedTasks: state.records.filter((record) => record.status !== "completed").length,
+    blockingTasks,
+    awaitingContinueTasks,
+  };
+}
+
 function tailLines(text: string, maxLines = 40): string {
   const lines = text.split(/\r?\n/).filter((line) => line.length > 0);
   return lines.slice(-maxLines).join("\n");
@@ -428,7 +473,7 @@ export async function getServiceStatus(
   const configPath = path.join(paths.stateDir, "config.json");
   const engine = await readInstanceEngine(configPath);
   const approvalMode = await readApprovalMode(configPath);
-  const sessionBindings = (await listSessions(env, paths.instanceName)).length;
+  const sessionSummary = await inspectSessionBindings(env, paths.instanceName);
   const lastHandledUpdateId = await getLastHandledUpdateId(path.join(paths.stateDir, "inbox"));
   const readToken = deps.readConfiguredBotToken ?? readConfiguredBotToken;
   const fetchIdentity =
@@ -452,9 +497,12 @@ export async function getServiceStatus(
 
   const lastErrorLine = await readLastNonEmptyLine(paths.stderrPath);
   let auditSummary: AuditSummary = { totalEvents: 0 };
+  let latestFailureCategory: string | undefined;
   try {
     const rawAudit = await readFile(resolveAuditLogPath(paths.stateDir), "utf8");
-    auditSummary = summarizeAuditEvents(parseAuditEvents(rawAudit));
+    const auditEvents = parseAuditEvents(rawAudit);
+    auditSummary = summarizeAuditEvents(auditEvents);
+    latestFailureCategory = getLatestFailure(auditEvents)?.category;
   } catch (error) {
     if (
       typeof error !== "object" ||
@@ -465,6 +513,7 @@ export async function getServiceStatus(
       throw error;
     }
   }
+  const workflowSummary = await summarizeUnresolvedTasks(paths.stateDir);
 
   return {
     instanceName: paths.instanceName,
@@ -480,7 +529,8 @@ export async function getServiceStatus(
     pairedUsers: accessStatus.pairedUsers,
     allowlistCount: accessStatus.allowlist.length,
     pendingPairs: accessStatus.pendingPairs.length,
-    sessionBindings,
+    sessionBindings: sessionSummary.warning ? null : sessionSummary.sessions.length,
+    sessionBindingsWarning: sessionSummary.warning,
     lastHandledUpdateId,
     botTokenConfigured: botToken !== null,
     botIdentity,
@@ -489,6 +539,11 @@ export async function getServiceStatus(
     lastSuccessAt: auditSummary.lastSuccessAt,
     lastFailureAt: auditSummary.lastErrorAt,
     auditEvents: auditSummary.totalEvents,
+    latestFailureCategory,
+    unresolvedTasks: workflowSummary.unresolvedTasks,
+    blockingTasks: workflowSummary.blockingTasks,
+    awaitingContinueTasks: workflowSummary.awaitingContinueTasks,
+    unresolvedTasksWarning: workflowSummary.unresolvedTasksWarning,
   };
 }
 
@@ -502,6 +557,16 @@ export async function runServiceDoctor(
   const status = await getServiceStatus(env, instanceName, deps);
   const checks: ServiceDoctorResult["checks"] = [];
 
+  checks.push({
+    name: "engine",
+    ok: true,
+    detail: `Engine: ${status.engine}.`,
+  });
+  checks.push({
+    name: "runtime",
+    ok: true,
+    detail: `Runtime: ${status.runtime}.`,
+  });
   checks.push({
     name: "build",
     ok: existsSync(paths.entryPath),
@@ -528,13 +593,24 @@ export async function runServiceDoctor(
   });
   checks.push({
     name: "sessions",
-    ok: true,
-    detail: `Session bindings: ${status.sessionBindings}.`,
+    ok: status.sessionBindingsWarning === undefined,
+    detail:
+      status.sessionBindingsWarning !== undefined
+        ? `Session bindings: unknown (${status.sessionBindingsWarning}).`
+        : `Session bindings: ${status.sessionBindings}.`,
   });
   checks.push({
     name: "audit",
     ok: true,
-    detail: `Audit events: ${status.auditEvents}. Last success: ${status.lastSuccessAt ?? "none"}. Last failure: ${status.lastFailureAt ?? "none"}.`,
+    detail: `Audit events: ${status.auditEvents}. Last success: ${status.lastSuccessAt ?? "none"}. Last failure: ${status.lastFailureAt ?? "none"}. latest failure category: ${status.latestFailureCategory ?? "none"}.`,
+  });
+  checks.push({
+    name: "tasks",
+    ok: status.unresolvedTasksWarning === undefined && (status.blockingTasks ?? 0) === 0,
+    detail:
+      status.unresolvedTasksWarning !== undefined
+        ? `unresolved tasks: unknown (${status.unresolvedTasksWarning}).`
+        : `unresolved tasks: ${status.unresolvedTasks}. blocking tasks: ${status.blockingTasks}. awaiting continue: ${status.awaitingContinueTasks}.`,
   });
   checks.push({
     name: "stderr",
@@ -544,6 +620,8 @@ export async function runServiceDoctor(
 
   return {
     instanceName: status.instanceName,
+    engine: status.engine,
+    runtime: status.runtime,
     healthy: checks.every((check) => check.ok),
     checks,
   };

@@ -1,6 +1,8 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
+import { classifyFailure, type FailureCategory } from "../runtime/error-classification.js";
+
 export interface AuditEvent {
   timestamp?: string;
   type: string;
@@ -24,6 +26,28 @@ export interface AuditSummary {
   totalEvents: number;
   lastSuccessAt?: string;
   lastErrorAt?: string;
+}
+
+export interface LatestFailureSummary {
+  timestamp?: string;
+  category: FailureCategory;
+  detail?: string;
+}
+
+const failureCategories = new Set<FailureCategory>([
+  "auth",
+  "write-permission",
+  "telegram-conflict",
+  "telegram-delivery",
+  "engine-cli",
+  "file-workflow",
+  "workflow-state",
+  "session-state",
+  "unknown",
+]);
+
+function isFailureCategory(value: unknown): value is FailureCategory {
+  return typeof value === "string" && failureCategories.has(value as FailureCategory);
 }
 
 export function resolveAuditLogPath(stateDir: string): string {
@@ -106,4 +130,28 @@ export function summarizeAuditEvents(events: AuditEvent[]): AuditSummary {
   }
 
   return summary;
+}
+
+export function getLatestFailure(events: AuditEvent[]): LatestFailureSummary | undefined {
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index];
+    if (event?.outcome !== "error") {
+      continue;
+    }
+
+    const metadataCategory = event.metadata ? event.metadata.failureCategory : undefined;
+    const category = isFailureCategory(metadataCategory) ? metadataCategory : classifyFailure(event.detail ?? event.type);
+    const summary: LatestFailureSummary = {
+      category,
+      detail: event.detail,
+    };
+
+    if (event.timestamp !== undefined) {
+      summary.timestamp = event.timestamp;
+    }
+
+    return summary;
+  }
+
+  return undefined;
 }

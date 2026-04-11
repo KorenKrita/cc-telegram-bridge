@@ -337,6 +337,32 @@ Telegram 消息 → 标准化 → 访问检查 → 聊天队列（串行）
 
 所有命令支持 `--instance <name>` 指定目标 bot。
 
+## 稳定 Beta 命令
+
+- `telegram service doctor --instance <name>`
+- `telegram session list --instance <name>`
+- `telegram session inspect --instance <name> <chat-id>`
+- `telegram session reset --instance <name> <chat-id>`
+- `telegram task list --instance <name>`
+- `telegram task inspect --instance <name> <upload-id>`
+- `telegram task clear --instance <name> <upload-id>`
+
+Telegram 用户也可以使用：
+
+- `/status`
+- `/continue`
+- `/reset`
+- `/help`
+
+针对压缩包摘要，推荐直接回复该摘要或点击其中的 Continue Analysis 按钮继续；裸 `/continue` 只会恢复最近一个等待中的压缩包。
+
+状态文件损坏时的恢复行为：
+
+- 当 `session.json` 或 `file-workflow.json` 不可读时，`telegram service status` 和 `telegram service doctor` 会降级为 `unknown (...)` 警告，而不是直接崩溃。
+- `telegram session inspect` 和 `telegram task inspect` 会提示状态不可读并直接停止，不会假装记录不存在。
+- `telegram session reset`、`telegram task clear` 以及 Telegram `/reset` 只会在文件损坏或结构非法时自愈；写入默认空状态前，会先把原始不可读文件隔离备份到同目录。
+- Telegram `/status` 在底层 JSON 不可读时，会把 session/task 状态显示为 `unknown (...)`。
+
 ### Shell 辅助脚本
 
 **Windows (PowerShell):**
@@ -374,8 +400,8 @@ npm run dev -- telegram status [--instance work]
 ## 会话检视
 
 ```bash
-npm run dev -- telegram session list [--instance work]
-npm run dev -- telegram session show [--instance work] <chat-id>
+npm run dev -- telegram session inspect [--instance work] <chat-id>
+npm run dev -- telegram session reset [--instance work] <chat-id>
 ```
 
 ---

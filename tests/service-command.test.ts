@@ -349,6 +349,18 @@ describe("telegram service commands", () => {
               chatId: 100,
               userId: 100,
               kind: "document",
+              status: "preparing",
+              sourceFiles: ["prep.txt"],
+              derivedFiles: [],
+              summary: "preparing",
+              createdAt: "2026-04-08T09:00:30.000Z",
+              updatedAt: "2026-04-08T09:00:30.000Z",
+            },
+            {
+              uploadId: "three",
+              chatId: 100,
+              userId: 100,
+              kind: "document",
               status: "awaiting_continue",
               sourceFiles: ["b.txt"],
               derivedFiles: [],
@@ -357,7 +369,7 @@ describe("telegram service commands", () => {
               updatedAt: "2026-04-08T09:01:00.000Z",
             },
             {
-              uploadId: "three",
+              uploadId: "four",
               chatId: 100,
               userId: 100,
               kind: "document",
@@ -388,7 +400,7 @@ describe("telegram service commands", () => {
       expect(messages[0]).toContain("Engine: codex");
       expect(messages[0]).toContain("Runtime: process");
       expect(messages[0]).toContain("latest failure category: write-permission");
-      expect(messages[0]).toContain("blocking tasks: 1");
+      expect(messages[0]).toContain("blocking tasks: 2");
       expect(messages[0]).toContain("awaiting continue: 1");
       expect(messages[0]).toContain("- fail tasks:");
     } finally {
@@ -654,6 +666,18 @@ describe("telegram service commands", () => {
               chatId: 100,
               userId: 100,
               kind: "document",
+              status: "preparing",
+              sourceFiles: ["prep.txt"],
+              derivedFiles: [],
+              summary: "preparing",
+              createdAt: "2026-04-08T09:00:30.000Z",
+              updatedAt: "2026-04-08T09:00:30.000Z",
+            },
+            {
+              uploadId: "three",
+              chatId: 100,
+              userId: 100,
+              kind: "document",
               status: "awaiting_continue",
               sourceFiles: ["b.txt"],
               derivedFiles: [],
@@ -662,7 +686,7 @@ describe("telegram service commands", () => {
               updatedAt: "2026-04-08T09:01:00.000Z",
             },
             {
-              uploadId: "three",
+              uploadId: "four",
               chatId: 100,
               userId: 100,
               kind: "document",
@@ -689,8 +713,8 @@ describe("telegram service commands", () => {
       });
 
       expect(handled).toBe(true);
-      expect(messages[0]).toContain("Unresolved tasks: 2");
-      expect(messages[0]).toContain("Blocking tasks: 1");
+      expect(messages[0]).toContain("Unresolved tasks: 3");
+      expect(messages[0]).toContain("Blocking tasks: 2");
       expect(messages[0]).toContain("Awaiting continue tasks: 1");
     } finally {
       await rm(tempDir, { recursive: true, force: true });

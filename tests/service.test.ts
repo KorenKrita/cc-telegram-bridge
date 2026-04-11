@@ -2881,6 +2881,18 @@ describe("polling helpers", () => {
             chatId: 123,
             userId: 456,
             kind: "archive",
+            status: "preparing",
+            sourceFiles: ["prep.zip"],
+            derivedFiles: [],
+            summary: "preparing summary",
+            createdAt: "2026-04-10T00:00:30.000Z",
+            updatedAt: "2026-04-10T00:00:30.000Z",
+          },
+          {
+            uploadId: "three",
+            chatId: 123,
+            userId: 456,
+            kind: "archive",
             status: "awaiting_continue",
             sourceFiles: ["b.zip"],
             derivedFiles: [],
@@ -2889,7 +2901,7 @@ describe("polling helpers", () => {
             updatedAt: "2026-04-10T00:01:00.000Z",
           },
           {
-            uploadId: "three",
+            uploadId: "four",
             chatId: 123,
             userId: 456,
             kind: "document",
@@ -2901,7 +2913,7 @@ describe("polling helpers", () => {
             updatedAt: "2026-04-10T00:02:00.000Z",
           },
           {
-            uploadId: "four",
+            uploadId: "five",
             chatId: 123,
             userId: 456,
             kind: "document",
@@ -2950,7 +2962,7 @@ describe("polling helpers", () => {
         [
           "Engine: codex",
           "Session bound: yes",
-          "Blocking file tasks: 2",
+          "Blocking file tasks: 3",
           "Waiting file tasks: 1",
         ].join("\n"),
       );
@@ -3486,6 +3498,58 @@ describe("polling helpers", () => {
       expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalled();
     } finally {
       readSpy.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps /reset on explicit session-state guidance when wrapped permission failures lose errno metadata", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    const resetSpy = vi.spyOn(SessionStore.prototype, "removeByChatIdRecovering");
+    resetSpy.mockRejectedValueOnce(new Error("Session state permission denied while reading bindings"));
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      getFile: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockResolvedValue({ text: "done" }),
+    };
+
+    try {
+      await expect(
+        handleNormalizedTelegramMessage(
+          {
+            chatId: 123,
+            userId: 456,
+            chatType: "private",
+            text: "/reset",
+            replyContext: undefined,
+            attachments: [],
+          },
+          {
+            api: api as never,
+            bridge: bridge as never,
+            inboxDir,
+          },
+        ),
+      ).rejects.toThrow("Session state permission denied while reading bindings");
+
+      expect(api.editMessage).toHaveBeenLastCalledWith(
+        123,
+        11,
+        "Error: Session state is unavailable right now. The operator needs to restore read access and retry.",
+      );
+      expect(api.editMessage).not.toHaveBeenLastCalledWith(
+        123,
+        11,
+        "Error: File creation is blocked by the current write policy. Retry in a writable mode.",
+      );
+      expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalled();
+    } finally {
+      resetSpy.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
   });

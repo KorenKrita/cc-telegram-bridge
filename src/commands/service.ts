@@ -97,6 +97,8 @@ export interface ServiceDoctorResult {
   }>;
 }
 
+const BLOCKING_WORKFLOW_STATUSES = new Set(["preparing", "processing", "failed"]);
+
 function defaultIsProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -328,7 +330,7 @@ async function summarizeUnresolvedTasks(stateDir: string): Promise<{
     };
   }
 
-  const blockingTasks = state.records.filter((record) => record.status === "processing" || record.status === "failed").length;
+  const blockingTasks = state.records.filter((record) => BLOCKING_WORKFLOW_STATUSES.has(record.status)).length;
   const awaitingContinueTasks = state.records.filter((record) => record.status === "awaiting_continue").length;
 
   return {

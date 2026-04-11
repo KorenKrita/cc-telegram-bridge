@@ -105,6 +105,49 @@ function isStatusCommand(text: string): boolean {
   return /^\/status(?:@\w+)?(?:\s|$)/i.test(text.trim());
 }
 
+function isBlockingWorkflowStatus(status: "preparing" | "processing" | "awaiting_continue" | "completed" | "failed"): boolean {
+  return status === "preparing" || status === "processing" || status === "failed";
+}
+
+function shouldUseNonRepairableResetSessionGuidance(
+  error: unknown,
+  failureCategory: ReturnType<typeof classifyFailure>,
+  originalText: string,
+): boolean {
+  if (!isResetCommand(originalText)) {
+    return false;
+  }
+
+  if (error instanceof SessionStateError) {
+    return !error.repairable;
+  }
+
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    ((((error as NodeJS.ErrnoException).code === "EACCES") || (error as NodeJS.ErrnoException).code === "EPERM"))
+  ) {
+    return true;
+  }
+
+  if (failureCategory === "session-state") {
+    return true;
+  }
+
+  const errorText =
+    error instanceof Error
+      ? `${error.name}\n${error.message}`.toLowerCase()
+      : String(error).toLowerCase();
+
+  return (
+    errorText.includes("session state") ||
+    errorText.includes("session-store") ||
+    errorText.includes("session store") ||
+    errorText.includes("session binding")
+  );
+}
+
 function inferExtension(attachment: NormalizedTelegramAttachment, telegramFilePath: string): string {
   const explicitExtension = attachment.fileName ? path.extname(attachment.fileName) : "";
   if (explicitExtension) {
@@ -325,7 +368,7 @@ export async function handleNormalizedTelegramMessage(
         : workflowResult.state.records.filter((record) => record.chatId === normalized.chatId);
       const blockingTasks = workflowResult.warning
         ? null
-        : chatRecords.filter((record) => record.status === "processing" || record.status === "failed").length;
+        : chatRecords.filter((record) => isBlockingWorkflowStatus(record.status)).length;
       const waitingTasks = workflowResult.warning
         ? null
         : chatRecords.filter((record) => record.status === "awaiting_continue").length;
@@ -529,7 +572,9 @@ export async function handleNormalizedTelegramMessage(
     const classifiedError = error instanceof FileWorkflowPreparationError ? error.cause : error;
     const message = classifiedError instanceof Error ? classifiedError.message : String(classifiedError);
     const failureCategory = classifyFailure(classifiedError);
-    const errorMessage = classifiedError instanceof SessionStateError
+    const errorMessage = shouldUseNonRepairableResetSessionGuidance(classifiedError, failureCategory, normalized.text)
+      ? renderSessionStateErrorMessage(false)
+      : classifiedError instanceof SessionStateError
       ? renderSessionStateErrorMessage(classifiedError.repairable)
       : failureHint
       ? `${renderCategorizedErrorMessage(failureCategory, message)}\n${failureHint}`

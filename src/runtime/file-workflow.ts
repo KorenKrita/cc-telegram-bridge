@@ -187,7 +187,8 @@ async function extractArchiveToDirectory(archivePath: string, targetDir: string)
     }
 
     const destinationPath = path.resolve(targetRoot, normalizedEntryPath);
-    if (!destinationPath.startsWith(targetRoot)) {
+    const relativeDestination = path.relative(targetRoot, destinationPath);
+    if (relativeDestination === "" || relativeDestination.startsWith("..") || path.isAbsolute(relativeDestination)) {
       throw new Error(`Archive entry escapes target directory: ${entry.entryName}`);
     }
 

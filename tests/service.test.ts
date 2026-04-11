@@ -66,6 +66,29 @@ function createZipBuffer(files: Record<string, string>): Buffer {
   return zip.toBuffer();
 }
 
+function replaceBufferContents(buffer: Buffer, search: string, replace: string): Buffer {
+  const searchBytes = Buffer.from(search, "utf8");
+  const replaceBytes = Buffer.from(replace, "utf8");
+
+  if (searchBytes.length !== replaceBytes.length) {
+    throw new Error("replacement must preserve byte length");
+  }
+
+  const patched = Buffer.from(buffer);
+  let offset = 0;
+  while (offset <= patched.length - searchBytes.length) {
+    const foundAt = patched.indexOf(searchBytes, offset);
+    if (foundAt === -1) {
+      break;
+    }
+
+    replaceBytes.copy(patched, foundAt);
+    offset = foundAt + searchBytes.length;
+  }
+
+  return patched;
+}
+
 afterEach(async () => {
   await rm(path.join(os.tmpdir(), "ignored"), { recursive: true, force: true });
   await rm(path.join(os.tmpdir(), "runtime-state.json"), { force: true });
@@ -1128,6 +1151,67 @@ describe("polling helpers", () => {
         123,
         11,
         "Error: File handling failed while preparing your request. Retry with a smaller or different file.",
+      );
+      expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects archive entries that escape into a sibling prefix directory", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    const placeholderEntryName = "xxxxxxxxxxxxxxxxxxxxxxxxxx";
+    const zipBuffer = replaceBufferContents(
+      createZipBuffer({
+        [placeholderEntryName]: "escape attempt",
+        "README.md": "# hello",
+      }),
+      placeholderEntryName,
+      "../extracted-evil/file.txt",
+    );
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      getFile: vi.fn().mockResolvedValue({ file_path: "uploads/evil.zip" }),
+      downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
+        await writeFile(destinationPath, zipBuffer);
+      }),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn(),
+    };
+
+    try {
+      await expect(
+        handleNormalizedTelegramMessage(
+          {
+            chatId: 123,
+            userId: 456,
+            chatType: "private",
+            text: "",
+            replyContext: undefined,
+            attachments: [{ fileId: "zip-1", fileName: "evil.zip", kind: "document" }],
+          },
+          {
+            api: api as never,
+            bridge: bridge as never,
+            inboxDir,
+          },
+        ),
+      ).rejects.toThrow("escapes target directory");
+
+      const workflowState = JSON.parse(await readFile(path.join(root, "file-workflow.json"), "utf8")) as {
+        records: Array<{ status: string; kind: string; summary: string }>;
+      };
+
+      expect(workflowState.records[0]).toEqual(
+        expect.objectContaining({
+          kind: "archive",
+          status: "failed",
+          summary: expect.stringMatching(/escapes target directory/i),
+        }),
       );
       expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalled();
     } finally {

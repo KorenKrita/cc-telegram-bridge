@@ -1,8 +1,20 @@
 import { SessionStore } from "../state/session-store.js";
 import type { CodexAdapter } from "../codex/adapter.js";
 
-const SESSION_STATE_UNREADABLE_ERROR =
+export class SessionStateError extends Error {
+  readonly repairable: boolean;
+
+  constructor(message: string, repairable: boolean) {
+    super(message);
+    this.name = "SessionStateError";
+    this.repairable = repairable;
+  }
+}
+
+const REPAIRABLE_SESSION_STATE_ERROR =
   "Session state is unreadable right now. Reset the chat and try again.";
+const NON_REPAIRABLE_SESSION_STATE_ERROR =
+  "Session state is unavailable right now. The operator needs to restore read access and retry.";
 
 export class SessionManager {
   constructor(
@@ -14,7 +26,10 @@ export class SessionManager {
     const existing = await this.sessionStore.findByChatIdSafe(chatId);
 
     if (existing.warning) {
-      throw new Error(SESSION_STATE_UNREADABLE_ERROR);
+      throw new SessionStateError(
+        existing.repairable ? REPAIRABLE_SESSION_STATE_ERROR : NON_REPAIRABLE_SESSION_STATE_ERROR,
+        existing.repairable ?? false,
+      );
     }
 
     if (existing.record) {

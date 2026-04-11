@@ -233,9 +233,28 @@ describe("SessionStore", () => {
       await expect(store.inspect()).resolves.toEqual({
         state: { chats: [] },
         warning: SESSION_STATE_UNREADABLE_WARNING,
+        repairable: false,
       });
     } finally {
       readSpy.mockRestore();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats malformed reads as repairable unreadable session state", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const filePath = path.join(tempDir, "session.json");
+    const store = new SessionStore(filePath);
+
+    try {
+      await writeFile(filePath, "{not valid json", "utf8");
+
+      await expect(store.inspect()).resolves.toEqual({
+        state: { chats: [] },
+        warning: SESSION_STATE_UNREADABLE_WARNING,
+        repairable: true,
+      });
+    } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
   });

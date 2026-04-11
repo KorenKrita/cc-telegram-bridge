@@ -49,7 +49,7 @@ const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const ARCHIVE_EXTENSIONS = new Set([".zip"]);
 const MAX_DOCUMENT_TEXT_CHARS = 12_000;
 const MAX_TREE_LINES = 40;
-const ARCHIVE_CONTINUE_HINT = 'Reply "继续分析", run /continue, or press the Continue Analysis button to continue with this archive.';
+const ARCHIVE_CONTINUE_HINT = 'Reply "继续分析" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.';
 const TARGETED_ARCHIVE_RETRY_HINT = 'Retry this specific archive from its original summary: press Continue Analysis again there or reply "继续分析" to that summary.';
 const MAX_ARCHIVE_SUMMARY_DELIVERY_CHARS = 3900;
 

@@ -28,12 +28,18 @@ export function renderSessionResetMessage(repaired = false): string {
     : "Session reset for this chat.";
 }
 
+export function renderSessionStateErrorMessage(repairable: boolean): string {
+  return repairable
+    ? "Error: Session state is unavailable right now. Reset the chat and try again."
+    : "Error: Session state is unavailable right now. The operator needs to restore read access and retry.";
+}
+
 export function renderTelegramHelpMessage(): string {
   return [
     "Telegram commands:",
     "/status - show engine, session, and file task state",
     "Send files directly to analyze them in chat.",
-    "Archives pause after summary; reply \"继续分析\", run /continue, or press Continue Analysis to keep going.",
+    "Archives pause after summary; reply \"继续分析\" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.",
     "/continue - resume the latest waiting archive",
     "/reset - clear the current chat session",
     "/help - show this help",

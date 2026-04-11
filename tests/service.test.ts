@@ -30,6 +30,7 @@ import { parseAuditEvents } from "../src/state/audit-log.js";
 import * as auditLog from "../src/state/audit-log.js";
 import { AccessStore } from "../src/state/access-store.js";
 import { FileWorkflowStore } from "../src/state/file-workflow-store.js";
+import { JsonStore } from "../src/state/json-store.js";
 import { SessionManager } from "../src/runtime/session-manager.js";
 import { SessionStore } from "../src/state/session-store.js";
 
@@ -985,7 +986,9 @@ describe("polling helpers", () => {
       expect(api.editMessage).toHaveBeenLastCalledWith(
         123,
         11,
-        expect.stringContaining("Reply \"继续分析\", run /continue, or press the Continue Analysis button to continue with this archive."),
+        expect.stringContaining(
+          "Reply \"继续分析\" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.",
+        ),
         expect.objectContaining({
           inlineKeyboard: [[{ text: "Continue Analysis", callbackData: expect.stringMatching(/^continue-archive:/) }]],
         }),
@@ -1001,7 +1004,9 @@ describe("polling helpers", () => {
       expect(api.editMessage).toHaveBeenLastCalledWith(
         123,
         11,
-        expect.stringContaining("press the Continue Analysis button"),
+        expect.stringContaining(
+          "Reply \"继续分析\" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.",
+        ),
         expect.objectContaining({
           inlineKeyboard: [[{ text: "Continue Analysis", callbackData: `continue-archive:${workflowState.records[0]?.uploadId}` }]],
         }),
@@ -2311,8 +2316,8 @@ describe("polling helpers", () => {
       );
 
       const summaryDelivery = (api.editMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1);
-      expect(summaryDelivery?.[2]).toContain("Continue Analysis button");
-      expect(summaryDelivery?.[2]).toContain("run /continue");
+      expect(summaryDelivery?.[2]).toContain("Reply \"继续分析\" or press Continue Analysis to continue this archive.");
+      expect(summaryDelivery?.[2]).toContain("Bare /continue resumes the latest waiting archive.");
       expect((summaryDelivery?.[2] as string).length).toBeLessThanOrEqual(3900);
       expect(summaryDelivery?.[3]).toEqual(
         expect.objectContaining({
@@ -3005,6 +3010,63 @@ describe("polling helpers", () => {
     }
   });
 
+  it("reports permission-denied session state without suggesting reset on the normal message path", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await mkdir(inboxDir, { recursive: true });
+    const accessStorePath = path.join(root, "access.json");
+    const sessionStorePath = path.join(root, "session.json");
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      getFile: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const adapter = {
+      createSession: vi.fn(),
+      sendUserMessage: vi.fn(),
+    };
+    const accessStore = new AccessStore(accessStorePath);
+    await accessStore.setPolicy("allowlist");
+    await accessStore.allowChat(123);
+    const sessionStore = new SessionStore(sessionStorePath);
+    const readSpy = vi.spyOn((sessionStore as unknown as { store: JsonStore<unknown> }).store, "read");
+    readSpy.mockRejectedValue(Object.assign(new Error("permission denied"), { code: "EACCES" }));
+    const sessionManager = new SessionManager(sessionStore, adapter as never);
+    const bridge = new Bridge(accessStore, sessionManager, adapter as never);
+
+    try {
+      await processTelegramUpdates(
+        [
+          {
+            update_id: 42,
+            message: {
+              message_id: 11,
+              chat: { id: 123, type: "private" },
+              from: { id: 456 },
+              text: "hello",
+            },
+          },
+        ],
+        {
+          api: api as never,
+          bridge: bridge as never,
+          inboxDir,
+        },
+      );
+
+      expect(api.editMessage).toHaveBeenLastCalledWith(
+        123,
+        11,
+        "Error: Session state is unavailable right now. The operator needs to restore read access and retry.",
+      );
+      expect(adapter.sendUserMessage).not.toHaveBeenCalled();
+    } finally {
+      readSpy.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("returns help text for /help", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const inboxDir = path.join(root, "inbox");
@@ -3043,7 +3105,7 @@ describe("polling helpers", () => {
           "Telegram commands:",
           "/status - show engine, session, and file task state",
           "Send files directly to analyze them in chat.",
-          "Archives pause after summary; reply \"继续分析\", run /continue, or press Continue Analysis to keep going.",
+          "Archives pause after summary; reply \"继续分析\" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.",
           "/continue - resume the latest waiting archive",
           "/reset - clear the current chat session",
           "/help - show this help",
@@ -3092,18 +3154,131 @@ describe("polling helpers", () => {
     expect(api.editMessage).toHaveBeenLastCalledWith(
       123,
       11,
-      [
-        "Telegram commands:",
-        "/status - show engine, session, and file task state",
-        "Send files directly to analyze them in chat.",
-        "Archives pause after summary; reply \"继续分析\", run /continue, or press Continue Analysis to keep going.",
-        "/continue - resume the latest waiting archive",
-        "/reset - clear the current chat session",
-        "/help - show this help",
-      ].join("\n"),
-    );
+        [
+          "Telegram commands:",
+          "/status - show engine, session, and file task state",
+          "Send files directly to analyze them in chat.",
+          "Archives pause after summary; reply \"继续分析\" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.",
+          "/continue - resume the latest waiting archive",
+          "/reset - clear the current chat session",
+          "/help - show this help",
+        ].join("\n"),
+      );
     expect(api.sendMessage).toHaveBeenCalledTimes(1);
     expect(api.sendMessage).toHaveBeenCalledWith(123, "Received. Starting your session...");
+  });
+
+  it("keeps /status successful when late audit writing fails", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const stateDir = path.join(root, "state");
+    const inboxDir = path.join(stateDir, "inbox");
+    await mkdir(inboxDir, { recursive: true });
+    await mkdir(path.join(stateDir, "audit.log.jsonl"));
+    await writeFile(path.join(stateDir, "session.json"), JSON.stringify({ chats: [] }), "utf8");
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      getFile: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockResolvedValue({ text: "done" }),
+    };
+
+    try {
+      await expect(
+        handleNormalizedTelegramMessage(
+          {
+            chatId: 123,
+            userId: 456,
+            chatType: "private",
+            text: "/status",
+            replyContext: undefined,
+            attachments: [],
+          },
+          {
+            api: api as never,
+            bridge: bridge as never,
+            inboxDir,
+          },
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(api.editMessage).toHaveBeenLastCalledWith(
+        123,
+        11,
+        [
+          "Engine: codex",
+          "Session bound: no",
+          "Blocking file tasks: 0",
+          "Waiting file tasks: 0",
+        ].join("\n"),
+      );
+      expect(api.sendMessage).toHaveBeenCalledTimes(1);
+      expect(api.sendMessage).toHaveBeenCalledWith(123, "Received. Starting your session...");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps /reset successful when late audit writing fails", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const stateDir = path.join(root, "state");
+    const inboxDir = path.join(stateDir, "inbox");
+    await mkdir(inboxDir, { recursive: true });
+    await mkdir(path.join(stateDir, "audit.log.jsonl"));
+    await writeFile(
+      path.join(stateDir, "session.json"),
+      JSON.stringify({
+        chats: [
+          {
+            telegramChatId: 123,
+            codexSessionId: "thread-old",
+            status: "idle",
+            updatedAt: "2026-04-10T00:00:00.000Z",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      getFile: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockResolvedValue({ text: "done" }),
+    };
+
+    try {
+      await expect(
+        handleNormalizedTelegramMessage(
+          {
+            chatId: 123,
+            userId: 456,
+            chatType: "private",
+            text: "/reset",
+            replyContext: undefined,
+            attachments: [],
+          },
+          {
+            api: api as never,
+            bridge: bridge as never,
+            inboxDir,
+          },
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(api.editMessage).toHaveBeenLastCalledWith(123, 11, "Session reset for this chat.");
+      expect(JSON.parse(await readFile(path.join(stateDir, "session.json"), "utf8"))).toEqual({ chats: [] });
+      expect(api.sendMessage).toHaveBeenCalledTimes(1);
+      expect(api.sendMessage).toHaveBeenCalledWith(123, "Received. Starting your session...");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("does not reset session state when /reset is denied by access control", async () => {

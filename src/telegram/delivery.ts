@@ -20,6 +20,7 @@ import { FileWorkflowStore } from "../state/file-workflow-store.js";
 import { UsageStore } from "../state/usage-store.js";
 import { readFile } from "node:fs/promises";
 import { SessionStore } from "../state/session-store.js";
+import { SessionStateError } from "../runtime/session-manager.js";
 
 async function loadVerbosity(stateDir: string): Promise<number> {
   try {
@@ -73,6 +74,7 @@ import {
   renderTelegramHelpMessage,
   renderTelegramStatusMessage,
   renderUnauthorizedMessage,
+  renderSessionStateErrorMessage,
   renderSessionResetMessage,
   renderWorkingMessage,
 } from "./message-renderer.js";
@@ -509,7 +511,9 @@ export async function handleNormalizedTelegramMessage(
     const classifiedError = error instanceof FileWorkflowPreparationError ? error.cause : error;
     const message = classifiedError instanceof Error ? classifiedError.message : String(classifiedError);
     const failureCategory = classifyFailure(classifiedError);
-    const errorMessage = failureHint
+    const errorMessage = classifiedError instanceof SessionStateError
+      ? renderSessionStateErrorMessage(classifiedError.repairable)
+      : failureHint
       ? `${renderCategorizedErrorMessage(failureCategory, message)}\n${failureHint}`
       : renderCategorizedErrorMessage(failureCategory, message);
     let workflowCleanupError: unknown;

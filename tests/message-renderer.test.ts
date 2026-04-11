@@ -17,6 +17,7 @@ import {
   renderTelegramStatusMessage,
   renderPairingMessage,
   renderPrivateChatRequiredMessage,
+  renderSessionStateErrorMessage,
   renderSessionResetMessage,
   renderUnauthorizedMessage,
   renderWorkingMessage,
@@ -68,6 +69,12 @@ describe("message rendering", () => {
     expect(renderSessionResetMessage(true)).toBe(
       "Session reset. Previous session state was unreadable, so the instance-wide session bindings were cleared and reset.",
     );
+    expect(renderSessionStateErrorMessage(true)).toBe(
+      "Error: Session state is unavailable right now. Reset the chat and try again.",
+    );
+    expect(renderSessionStateErrorMessage(false)).toBe(
+      "Error: Session state is unavailable right now. The operator needs to restore read access and retry.",
+    );
     expect(renderCategorizedErrorMessage("write-permission", "write access denied")).toBe(
       "Error: File creation is blocked by the current write policy. Retry in a writable mode.",
     );
@@ -103,7 +110,7 @@ describe("message rendering", () => {
         "Telegram commands:",
         "/status - show engine, session, and file task state",
         "Send files directly to analyze them in chat.",
-        "Archives pause after summary; reply \"继续分析\", run /continue, or press Continue Analysis to keep going.",
+        "Archives pause after summary; reply \"继续分析\" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.",
         "/continue - resume the latest waiting archive",
         "/reset - clear the current chat session",
         "/help - show this help",

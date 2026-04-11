@@ -60,7 +60,7 @@ export class SessionStore {
     return this.store.read(createDefaultSessionState());
   }
 
-  async inspect(): Promise<{ state: SessionState; warning?: string }> {
+  async inspect(): Promise<{ state: SessionState; warning?: string; repairable?: boolean }> {
     try {
       return { state: await this.load() };
     } catch (error) {
@@ -68,6 +68,7 @@ export class SessionStore {
         return {
           state: createDefaultSessionState(),
           warning: SESSION_STATE_UNREADABLE_WARNING,
+          repairable: isRepairableSessionStateError(error),
         };
       }
 
@@ -95,11 +96,14 @@ export class SessionStore {
     return state.chats.find((record) => record.telegramChatId === telegramChatId) ?? null;
   }
 
-  async findByChatIdSafe(telegramChatId: number): Promise<{ record: SessionRecord | null; warning?: string }> {
-    const { state, warning } = await this.inspect();
+  async findByChatIdSafe(
+    telegramChatId: number,
+  ): Promise<{ record: SessionRecord | null; warning?: string; repairable?: boolean }> {
+    const { state, warning, repairable } = await this.inspect();
     return {
       record: state.chats.find((entry) => entry.telegramChatId === telegramChatId) ?? null,
       warning,
+      repairable,
     };
   }
 

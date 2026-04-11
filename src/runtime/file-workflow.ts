@@ -115,7 +115,12 @@ async function summarizeDocument(filePath: string): Promise<{ summaryText: strin
   };
 }
 
-function isContinueAnalysisCommand(text: string): { matches: boolean; extraInstructions: string; targetUploadId?: string } {
+function isContinueAnalysisCommand(text: string): {
+  matches: boolean;
+  extraInstructions: string;
+  targetUploadId?: string;
+  malformedTarget?: boolean;
+} {
   const trimmed = text.trim();
   const slashCommandPattern = /^\/continue(?:@\w+)?(?:\s+(.*))?$/i;
   const slashMatch = trimmed.match(slashCommandPattern);
@@ -127,6 +132,14 @@ function isContinueAnalysisCommand(text: string): { matches: boolean; extraInstr
         matches: true,
         targetUploadId: targetedMatch[1],
         extraInstructions: targetedMatch[2]?.trim() ?? "",
+      };
+    }
+
+    if (/^--upload(?:\s|$)/i.test(remainder)) {
+      return {
+        matches: true,
+        extraInstructions: "",
+        malformedTarget: true,
       };
     }
 
@@ -397,9 +410,16 @@ export async function prepareArchiveContinueWorkflow(input: {
     text: string;
   };
 }): Promise<FileWorkflowResult | null> {
-  const { matches, extraInstructions, targetUploadId } = isContinueAnalysisCommand(input.text);
+  const { matches, extraInstructions, targetUploadId, malformedTarget } = isContinueAnalysisCommand(input.text);
   if (!matches) {
     return null;
+  }
+
+  if (malformedTarget) {
+    return {
+      kind: "reply",
+      text: "Malformed continue command. Use /continue --upload <archive-id> [instructions].",
+    };
   }
 
   const store = new FileWorkflowStore(input.stateDir);

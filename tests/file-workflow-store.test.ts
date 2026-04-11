@@ -224,6 +224,52 @@ describe("FileWorkflowStore", () => {
     }
   });
 
+  it("allows explicitly targeted continuation to retry a failed archive without broadening generic lookup", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const store = new FileWorkflowStore(stateDir);
+
+    try {
+      await store.append({
+        uploadId: "one",
+        chatId: 100,
+        userId: 100,
+        kind: "archive",
+        status: "failed",
+        sourceFiles: ["a.zip"],
+        derivedFiles: [],
+        summary: "first",
+        summaryMessageId: 41,
+        extractedPath: "workspace/.telegram-files/one/extracted",
+        createdAt: "2026-04-10T00:00:00.000Z",
+        updatedAt: "2026-04-10T00:00:00.000Z",
+      });
+      await store.append({
+        uploadId: "two",
+        chatId: 100,
+        userId: 100,
+        kind: "archive",
+        status: "awaiting_continue",
+        sourceFiles: ["b.zip"],
+        derivedFiles: [],
+        summary: "second",
+        summaryMessageId: 42,
+        extractedPath: "workspace/.telegram-files/two/extracted",
+        createdAt: "2026-04-10T00:01:00.000Z",
+        updatedAt: "2026-04-10T00:01:00.000Z",
+      });
+
+      await expect(store.beginArchiveContinuation({ chatId: 100, uploadId: "one" })).resolves.toEqual(
+        expect.objectContaining({ uploadId: "one", status: "processing" }),
+      );
+      await expect(store.find("one")).resolves.toEqual(expect.objectContaining({ status: "processing" }));
+      await expect(store.getLatestAwaitingArchive(100)).resolves.toEqual(
+        expect.objectContaining({ uploadId: "two", status: "awaiting_continue" }),
+      );
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects non-canonical workflow timestamps", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const store = new FileWorkflowStore(stateDir);

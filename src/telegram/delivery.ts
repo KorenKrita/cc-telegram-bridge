@@ -230,6 +230,7 @@ export async function handleNormalizedTelegramMessage(
       const resetResult = await sessionStore.removeByChatIdRecovering(normalized.chatId);
       const resetMessage = renderSessionResetMessage(resetResult.repaired);
       await context.api.editMessage(normalized.chatId, placeholderMessageId, resetMessage);
+      placeholderShowsResponse = true;
       await appendAuditEvent(path.dirname(context.inboxDir), {
         type: "update.handle",
         instanceName: context.instanceName,
@@ -250,6 +251,7 @@ export async function handleNormalizedTelegramMessage(
     if (isHelpCommand(normalized.text)) {
       const helpMessage = renderTelegramHelpMessage();
       await context.api.editMessage(normalized.chatId, placeholderMessageId, helpMessage);
+      placeholderShowsResponse = true;
       await appendAuditEvent(path.dirname(context.inboxDir), {
         type: "update.handle",
         instanceName: context.instanceName,
@@ -288,6 +290,7 @@ export async function handleNormalizedTelegramMessage(
         taskStateWarning: workflowResult.warning,
       });
       await context.api.editMessage(normalized.chatId, placeholderMessageId, statusMessage);
+      placeholderShowsResponse = true;
       await appendAuditEvent(path.dirname(context.inboxDir), {
         type: "update.handle",
         instanceName: context.instanceName,

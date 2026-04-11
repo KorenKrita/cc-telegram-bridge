@@ -262,10 +262,14 @@ export class FileWorkflowStore {
 
     await this.enqueueWrite(async () => {
       const state = await this.load();
+      const isExplicitTarget = input.uploadId !== undefined || input.summaryMessageId !== undefined;
       const matchingRecords = state.records.filter((record) =>
         record.chatId === input.chatId &&
         record.kind === "archive" &&
-        record.status === "awaiting_continue",
+        (
+          record.status === "awaiting_continue" ||
+          (isExplicitTarget && record.status === "failed")
+        ),
       );
 
       const record =

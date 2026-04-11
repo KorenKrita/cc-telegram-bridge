@@ -323,6 +323,49 @@ describe("Bridge", () => {
     );
   });
 
+  it("does not append quoted archive-summary text when continue has no reply context", async () => {
+    const accessStore: AccessStoreLike = {
+      load: vi.fn().mockResolvedValue({
+        policy: "allowlist",
+        pairedUsers: [],
+        allowlist: [84],
+        pendingPairs: [],
+      }),
+      issuePairingCode: vi.fn(),
+    };
+    const sessionManager: SessionManagerLike = {
+      getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
+      bindSession: vi.fn(),
+    };
+    const adapter: CodexAdapter = {
+      sendUserMessage: vi.fn().mockResolvedValue({ text: "done" }),
+      createSession: vi.fn(),
+    };
+
+    const bridge = new Bridge(accessStore, sessionManager, adapter);
+    await bridge.handleAuthorizedMessage({
+      chatId: 84,
+      userId: 42,
+      chatType: "private",
+      text: "/continue --upload archive-1\n\n[Archive Analysis Context]\nContinue from extracted workspace.",
+      replyContext: undefined,
+      files: [],
+    });
+
+    expect(adapter.sendUserMessage).toHaveBeenCalledWith(
+      "telegram-84",
+      expect.objectContaining({
+        text: "/continue --upload archive-1\n\n[Archive Analysis Context]\nContinue from extracted workspace.",
+      }),
+    );
+    expect(adapter.sendUserMessage).not.toHaveBeenCalledWith(
+      "telegram-84",
+      expect.objectContaining({
+        text: expect.stringContaining("[Quoted message #"),
+      }),
+    );
+  });
+
   it("passes codex telegram-out instructions separately from user text", async () => {
     const accessStore: AccessStoreLike = {
       load: vi.fn().mockResolvedValue({

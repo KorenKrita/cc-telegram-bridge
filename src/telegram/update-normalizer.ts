@@ -99,7 +99,6 @@ export function normalizeUpdate(update: any): NormalizedTelegramMessage | null {
       chatType,
       text: `/continue --upload ${callbackData}`,
       callbackQueryId: typeof callbackQuery.id === "string" ? callbackQuery.id : undefined,
-      replyContext: normalizeReplyContext(message),
       attachments: [],
     };
   }

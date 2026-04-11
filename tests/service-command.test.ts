@@ -289,6 +289,8 @@ describe("telegram service commands", () => {
       expect(handled).toBe(true);
       expect(messages[0]).toContain("Instance: alpha");
       expect(messages[0]).toContain("Healthy: yes");
+      expect(messages[0]).toContain("Engine: codex");
+      expect(messages[0]).toContain("Runtime: process");
       expect(messages[0]).toContain("ok build:");
       expect(messages[0]).toContain("ok token:");
       expect(messages[0]).toContain("ok service:");
@@ -381,6 +383,8 @@ describe("telegram service commands", () => {
 
       expect(handled).toBe(true);
       expect(messages[0]).toContain("Healthy: no");
+      expect(messages[0]).toContain("Engine: codex");
+      expect(messages[0]).toContain("Runtime: process");
       expect(messages[0]).toContain("latest failure category: write-permission");
       expect(messages[0]).toContain("blocking tasks: 1");
       expect(messages[0]).toContain("awaiting continue: 1");
@@ -490,6 +494,41 @@ describe("telegram service commands", () => {
       expect(messages[0]).toContain("file workflow state unreadable");
       expect(messages[0]).toContain("- fail tasks: unresolved tasks: unknown (file workflow state unreadable).");
     } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not relabel internal task-health failures as unreadable workflow state", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const stateDir = path.join(tempDir, ".codex", "channels", "telegram", "alpha");
+    const lockPath = resolveInstanceLockPath(stateDir);
+    const inspectSpy = vi.spyOn((await import("../src/state/file-workflow-store.js")).FileWorkflowStore.prototype, "inspect");
+    inspectSpy.mockRejectedValueOnce(new Error("workflow summary exploded"));
+
+    try {
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(
+        lockPath,
+        JSON.stringify({
+          pid: 12345,
+          token: "token",
+          acquiredAt: new Date().toISOString(),
+        }),
+        "utf8",
+      );
+
+      await expect(
+        runCli(["telegram", "service", "doctor", "--instance", "alpha"], {
+          env: { USERPROFILE: tempDir },
+          serviceDeps: {
+            cwd: REPO_ROOT,
+            isProcessAlive: (pid) => pid === 12345,
+            isExpectedServiceProcess: (pid) => pid === 12345,
+          },
+        }),
+      ).rejects.toThrow("workflow summary exploded");
+    } finally {
+      inspectSpy.mockRestore();
       await rm(tempDir, { recursive: true, force: true });
     }
   });

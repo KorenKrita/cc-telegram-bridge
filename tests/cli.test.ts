@@ -490,9 +490,10 @@ describe("runCli", () => {
       });
 
       expect(handled).toBe(true);
-      expect(messages[0]).toBe('Task state unreadable for instance "alpha".');
-      expect(messages[1]).toContain("Recent file workflow records: unknown");
-      expect(messages[1]).not.toContain("Tasks: none");
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain("Recent file workflow records: unknown");
+      expect(messages[0]).toContain("Warning: file workflow state unreadable");
+      expect(messages[0]).not.toContain("Tasks: none");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

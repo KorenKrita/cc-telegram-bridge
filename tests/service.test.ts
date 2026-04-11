@@ -1066,6 +1066,7 @@ describe("polling helpers", () => {
     });
 
     expect(normalized).toEqual(expect.objectContaining({ text: "/continue --upload archive-1" }));
+    expect(normalized?.replyContext).toBeUndefined();
   });
 
   it("continues the archive selected by the clicked callback when multiple archives are waiting", async () => {
@@ -1147,6 +1148,18 @@ describe("polling helpers", () => {
       expect(bridge.handleAuthorizedMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           text: expect.stringContaining("archive summary one"),
+        }),
+      );
+      expect(bridge.handleAuthorizedMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          replyContext: undefined,
+        }),
+      );
+      expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          replyContext: expect.objectContaining({
+            text: expect.stringContaining("Archive summary"),
+          }),
         }),
       );
       expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalledWith(

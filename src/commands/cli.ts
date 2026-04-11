@@ -468,9 +468,6 @@ async function runTaskCommand(argv: string[], env: InstanceTokenEnv, logger: Cli
     }
 
     const result = await listTasks(env, instanceName);
-    if (result.warning === FILE_WORKFLOW_STATE_UNREADABLE_WARNING) {
-      logger.log(`Task state unreadable for instance "${instanceName}".`);
-    }
     logger.log(formatTaskList(instanceName, result));
     return true;
   }
@@ -572,6 +569,8 @@ function formatServiceDoctor(result: Awaited<ReturnType<typeof runServiceDoctor>
 
   return [
     `Instance: ${result.instanceName}`,
+    `Engine: ${result.engine}`,
+    `Runtime: ${result.runtime}`,
     `Healthy: ${result.healthy ? "yes" : "no"}`,
     ...checkLines,
   ].join("\n");

@@ -87,6 +87,8 @@ export interface ServiceStatus {
 
 export interface ServiceDoctorResult {
   instanceName: string;
+  engine: string;
+  runtime: string;
   healthy: boolean;
   checks: Array<{
     name: string;
@@ -315,18 +317,9 @@ async function summarizeUnresolvedTasks(stateDir: string): Promise<{
   awaitingContinueTasks: number | null;
   unresolvedTasksWarning?: string;
 }> {
-  try {
-    const workflowStore = new FileWorkflowStore(stateDir);
-    const records = await workflowStore.list();
-    const blockingTasks = records.filter((record) => record.status === "processing" || record.status === "failed").length;
-    const awaitingContinueTasks = records.filter((record) => record.status === "awaiting_continue").length;
-
-    return {
-      unresolvedTasks: records.filter((record) => record.status !== "completed").length,
-      blockingTasks,
-      awaitingContinueTasks,
-    };
-  } catch {
+  const workflowStore = new FileWorkflowStore(stateDir);
+  const { state, warning } = await workflowStore.inspect();
+  if (warning) {
     return {
       unresolvedTasks: null,
       blockingTasks: null,
@@ -334,6 +327,15 @@ async function summarizeUnresolvedTasks(stateDir: string): Promise<{
       unresolvedTasksWarning: FILE_WORKFLOW_STATE_UNREADABLE_WARNING,
     };
   }
+
+  const blockingTasks = state.records.filter((record) => record.status === "processing" || record.status === "failed").length;
+  const awaitingContinueTasks = state.records.filter((record) => record.status === "awaiting_continue").length;
+
+  return {
+    unresolvedTasks: state.records.filter((record) => record.status !== "completed").length,
+    blockingTasks,
+    awaitingContinueTasks,
+  };
 }
 
 function tailLines(text: string, maxLines = 40): string {
@@ -554,6 +556,16 @@ export async function runServiceDoctor(
   const checks: ServiceDoctorResult["checks"] = [];
 
   checks.push({
+    name: "engine",
+    ok: true,
+    detail: `Engine: ${status.engine}.`,
+  });
+  checks.push({
+    name: "runtime",
+    ok: true,
+    detail: `Runtime: ${status.runtime}.`,
+  });
+  checks.push({
     name: "build",
     ok: existsSync(paths.entryPath),
     detail: existsSync(paths.entryPath) ? `Entrypoint found at ${paths.entryPath}` : `Missing entrypoint at ${paths.entryPath}`,
@@ -606,6 +618,8 @@ export async function runServiceDoctor(
 
   return {
     instanceName: status.instanceName,
+    engine: status.engine,
+    runtime: status.runtime,
     healthy: checks.every((check) => check.ok),
     checks,
   };

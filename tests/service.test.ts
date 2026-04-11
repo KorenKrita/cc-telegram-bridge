@@ -14,6 +14,7 @@ import {
   readInstanceBotTokenFromEnvFile,
 } from "../src/service.js";
 import { ChatQueue } from "../src/runtime/chat-queue.js";
+import { Bridge } from "../src/runtime/bridge.js";
 import { classifyFailure } from "../src/runtime/error-classification.js";
 import { handleNormalizedTelegramMessage } from "../src/telegram/delivery.js";
 import { normalizeUpdate } from "../src/telegram/update-normalizer.js";
@@ -27,7 +28,10 @@ import { ProcessCodexAdapter } from "../src/codex/process-adapter.js";
 import { ClaudeStreamAdapter } from "../src/codex/claude-stream-adapter.js";
 import { parseAuditEvents } from "../src/state/audit-log.js";
 import * as auditLog from "../src/state/audit-log.js";
+import { AccessStore } from "../src/state/access-store.js";
 import { FileWorkflowStore } from "../src/state/file-workflow-store.js";
+import { SessionManager } from "../src/runtime/session-manager.js";
+import { SessionStore } from "../src/state/session-store.js";
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -2807,6 +2811,60 @@ describe("polling helpers", () => {
     }
   });
 
+  it("classifies malformed session state on the normal message path as session-state", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await writeFile(path.join(root, "session.json"), "{not valid json", "utf8");
+    const accessStorePath = path.join(root, "access.json");
+    const sessionStorePath = path.join(root, "session.json");
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      getFile: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const adapter = {
+      createSession: vi.fn(),
+      sendUserMessage: vi.fn(),
+    };
+    const accessStore = new AccessStore(accessStorePath);
+    await accessStore.setPolicy("allowlist");
+    await accessStore.allowChat(123);
+    const sessionStore = new SessionStore(sessionStorePath);
+    const sessionManager = new SessionManager(sessionStore, adapter as never);
+    const bridge = new Bridge(accessStore, sessionManager, adapter as never);
+
+    try {
+      await processTelegramUpdates(
+        [
+          {
+            update_id: 42,
+            message: {
+              message_id: 11,
+              chat: { id: 123, type: "private" },
+              from: { id: 456 },
+              text: "hello",
+            },
+          },
+        ],
+        {
+          api: api as never,
+          bridge: bridge as never,
+          inboxDir,
+        },
+      );
+
+      expect(api.editMessage).toHaveBeenLastCalledWith(
+        123,
+        11,
+        "Error: Session state is unavailable right now. Reset the chat and try again.",
+      );
+      expect(adapter.sendUserMessage).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("returns help text for /help", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const inboxDir = path.join(root, "inbox");
@@ -2846,7 +2904,7 @@ describe("polling helpers", () => {
           "/status - show engine, session, and file task state",
           "Send files directly to analyze them in chat.",
           "Archives pause after summary; reply \"继续分析\", run /continue, or press Continue Analysis to keep going.",
-          "/continue - resume the current archive after the summary",
+          "/continue - resume the latest waiting archive",
           "/reset - clear the current chat session",
           "/help - show this help",
         ].join("\n"),
@@ -2889,7 +2947,7 @@ describe("polling helpers", () => {
           inboxDir: path.join(stateBlocker, "inbox"),
         },
       ),
-    ).rejects.toThrow();
+    ).resolves.toBeUndefined();
 
     expect(api.editMessage).toHaveBeenLastCalledWith(
       123,
@@ -2899,16 +2957,13 @@ describe("polling helpers", () => {
         "/status - show engine, session, and file task state",
         "Send files directly to analyze them in chat.",
         "Archives pause after summary; reply \"继续分析\", run /continue, or press Continue Analysis to keep going.",
-        "/continue - resume the current archive after the summary",
+        "/continue - resume the latest waiting archive",
         "/reset - clear the current chat session",
         "/help - show this help",
       ].join("\n"),
     );
-    expect(api.sendMessage).toHaveBeenNthCalledWith(
-      2,
-      123,
-      expect.stringMatching(/^Error:/),
-    );
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    expect(api.sendMessage).toHaveBeenCalledWith(123, "Received. Starting your session...");
   });
 
   it("does not reset session state when /reset is denied by access control", async () => {

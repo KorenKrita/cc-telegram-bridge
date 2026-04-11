@@ -34,7 +34,7 @@ export function renderTelegramHelpMessage(): string {
     "/status - show engine, session, and file task state",
     "Send files directly to analyze them in chat.",
     "Archives pause after summary; reply \"继续分析\", run /continue, or press Continue Analysis to keep going.",
-    "/continue - resume the current archive after the summary",
+    "/continue - resume the latest waiting archive",
     "/reset - clear the current chat session",
     "/help - show this help",
   ].join("\n");

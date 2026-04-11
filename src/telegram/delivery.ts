@@ -43,6 +43,14 @@ async function loadEngine(stateDir: string): Promise<"codex" | "claude"> {
   }
 }
 
+async function appendAuditEventBestEffort(stateDir: string, event: Parameters<typeof appendAuditEvent>[1]): Promise<void> {
+  try {
+    await appendAuditEvent(stateDir, event);
+  } catch {
+    // Fast-path success responses should remain successful even if audit persistence fails late.
+  }
+}
+
 import {
   chunkTelegramMessage,
   renderAccessCheckMessage,
@@ -238,7 +246,7 @@ export async function handleNormalizedTelegramMessage(
       const resetMessage = renderSessionResetMessage(resetResult.repaired);
       await context.api.editMessage(normalized.chatId, placeholderMessageId, resetMessage);
       placeholderShowsResponse = true;
-      await appendAuditEvent(path.dirname(context.inboxDir), {
+      await appendAuditEventBestEffort(path.dirname(context.inboxDir), {
         type: "update.handle",
         instanceName: context.instanceName,
         chatId: normalized.chatId,
@@ -259,7 +267,7 @@ export async function handleNormalizedTelegramMessage(
       const helpMessage = renderTelegramHelpMessage();
       await context.api.editMessage(normalized.chatId, placeholderMessageId, helpMessage);
       placeholderShowsResponse = true;
-      await appendAuditEvent(path.dirname(context.inboxDir), {
+      await appendAuditEventBestEffort(path.dirname(context.inboxDir), {
         type: "update.handle",
         instanceName: context.instanceName,
         chatId: normalized.chatId,
@@ -298,7 +306,7 @@ export async function handleNormalizedTelegramMessage(
       });
       await context.api.editMessage(normalized.chatId, placeholderMessageId, statusMessage);
       placeholderShowsResponse = true;
-      await appendAuditEvent(path.dirname(context.inboxDir), {
+      await appendAuditEventBestEffort(path.dirname(context.inboxDir), {
         type: "update.handle",
         instanceName: context.instanceName,
         chatId: normalized.chatId,

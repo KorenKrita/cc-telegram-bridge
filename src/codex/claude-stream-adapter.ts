@@ -66,6 +66,7 @@ type ClaudeWorker = {
 };
 
 const MAX_INSTRUCTIONS_CHARS = 16_000;
+const MAX_LINE_BUFFER_BYTES = 1024 * 1024;
 
 function isLogicalTelegramSessionId(sessionId: string): boolean {
   return sessionId.startsWith("telegram-");
@@ -295,6 +296,13 @@ export class ClaudeStreamAdapter implements CodexAdapter {
 
   private handleStdout(worker: ClaudeWorker, chunk: string): void {
     worker.lineBuffer += chunk;
+
+    if (worker.lineBuffer.length > MAX_LINE_BUFFER_BYTES) {
+      this.failWorker(worker, new Error("Engine output exceeded maximum buffer size"));
+      worker.child.kill?.();
+      return;
+    }
+
     const lines = worker.lineBuffer.split(/\r?\n/);
     worker.lineBuffer = lines.pop() ?? "";
 
@@ -374,6 +382,17 @@ export class ClaudeStreamAdapter implements CodexAdapter {
         },
       );
     });
+  }
+
+  destroy(): void {
+    for (const worker of this.workers.values()) {
+      worker.child.kill?.();
+      if (worker.pendingTurn) {
+        worker.pendingTurn.reject(new Error("Adapter destroyed"));
+        worker.pendingTurn = null;
+      }
+    }
+    this.workers.clear();
   }
 
   private failWorker(worker: ClaudeWorker, error: Error): void {

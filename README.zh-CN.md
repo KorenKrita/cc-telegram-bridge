@@ -198,6 +198,57 @@ npm run dev -- telegram verbosity --instance work      # 查看当前级别
 
 ---
 
+## 预算控制
+
+为每个实例设置消费上限。当总费用达到上限时，新请求将被拦截，直到提高或清除预算。
+
+```bash
+npm run dev -- telegram budget show --instance work     # 当前花费与上限
+npm run dev -- telegram budget set 10 --instance work   # 上限 $10
+npm run dev -- telegram budget clear --instance work    # 移除上限
+```
+
+预算实时执行 — 达到上限时 bot 会用中英双语提示。
+
+---
+
+## 国际化
+
+按实例切换 bot 的 UI 语言。所有 Telegram 回复、错误消息和状态输出都会以选定语言呈现。
+
+```bash
+npm run dev -- telegram locale zh --instance work   # 中文
+npm run dev -- telegram locale en --instance work   # 英文（默认）
+npm run dev -- telegram locale --instance work       # 查看当前
+```
+
+---
+
+## 实例管理
+
+通过 CLI 列出、重命名或删除实例。重命名和删除前必须先停止服务。
+
+```bash
+npm run dev -- telegram instance list                          # 显示所有实例
+npm run dev -- telegram instance rename old-name new-name      # 重命名
+npm run dev -- telegram instance delete staging --yes          # 删除（需要 --yes）
+```
+
+---
+
+## 备份与恢复
+
+一条命令备份或恢复实例的完整状态目录。零依赖的二进制归档格式，跨平台兼容，失败时自动回滚。
+
+```bash
+npm run dev -- telegram backup --instance work                 # 创建带时间戳的 .cctb.gz
+npm run dev -- telegram backup --instance work --out ./bak.cctb.gz
+npm run dev -- telegram restore ./bak.cctb.gz --instance work  # 恢复（实例不能已存在）
+npm run dev -- telegram restore ./bak.cctb.gz --instance work --force  # 覆盖已有实例
+```
+
+---
+
 ## 快速开始
 
 ### 环境要求
@@ -333,6 +384,13 @@ Telegram 消息 → 标准化 → 访问检查 → 聊天队列（串行）
 | `telegram yolo [on\|off\|unsafe]` | 切换自动审批模式 |
 | `telegram usage` | 查看 token 用量和费用估算 |
 | `telegram verbosity [0\|1\|2]` | 设置流式进度显示级别 |
+| `telegram budget [show\|set\|clear]` | 按实例费用上限（达到上限时拦截请求） |
+| `telegram locale [en\|zh]` | 按实例设置 bot UI 语言 |
+| `telegram instance [list\|rename\|delete]` | 通过 CLI 管理实例 |
+| `telegram backup [--instance <name>]` | 将实例状态归档为 `.cctb.gz` |
+| `telegram restore <archive>` | 从备份恢复实例（`--force` 覆盖已有） |
+| `telegram logs rotate` | 手动触发日志轮转 |
+| `telegram dashboard` | 生成并打开 HTML 状态仪表板 |
 | `telegram help` | 显示所有可用命令 |
 
 所有命令支持 `--instance <name>` 指定目标 bot。

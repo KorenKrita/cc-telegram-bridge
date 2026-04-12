@@ -22,7 +22,7 @@
 </h3>
 
 <p align="center">
-  <a href="#-dual-engine">Dual Engine</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-multi-bot-setup">Multi-Bot</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-agent-instructions">agent.md</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-yolo-mode">YOLO</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-usage-tracking">Usage</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-quick-start">Quick Start</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-docker">Docker</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#-service-operations">Ops</a>
+  <a href="#dual-engine-codex--claude-code">Dual Engine</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#multi-bot-setup">Multi-Bot</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#agent-instructions">agent.md</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#yolo-mode">YOLO</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#budget-control">Budget</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#localization">i18n</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#backup--restore">Backup</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#quick-start">Quick Start</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#service-operations">Ops</a>
 </p>
 
 > **RULE 1:** Let your Claude Code or Codex CLI set this up for you. Clone the repo, open it in your terminal, and tell your AI agent: *"read the README and configure a Telegram bot for me"*. It will handle the rest.
@@ -197,6 +197,59 @@ Stored in `config.json`, hot-reloadable.
 
 ---
 
+## Budget Control
+
+Set a per-instance spending cap. When total cost reaches the limit, new requests are blocked until the budget is raised or cleared.
+
+```bash
+npm run dev -- telegram budget show --instance work     # Current spend vs limit
+npm run dev -- telegram budget set 10 --instance work   # Cap at $10
+npm run dev -- telegram budget clear --instance work    # Remove cap
+```
+
+Budget is enforced in real-time — the bot replies with a bilingual message when the limit is hit.
+
+---
+
+## Localization
+
+Switch the bot's UI language per instance. All Telegram replies, error messages, and status output are rendered in the selected language.
+
+```bash
+npm run dev -- telegram locale zh --instance work   # Chinese
+npm run dev -- telegram locale en --instance work   # English (default)
+npm run dev -- telegram locale --instance work       # Check current
+```
+
+---
+
+## Instance Management
+
+List, rename, or delete instances from the CLI. The service must be stopped before renaming or deleting.
+
+```bash
+npm run dev -- telegram instance list                          # Show all instances
+npm run dev -- telegram instance rename old-name new-name      # Rename
+npm run dev -- telegram instance delete staging --yes          # Delete (requires --yes)
+```
+
+---
+
+## Backup & Restore
+
+Back up an instance's entire state directory to a single `.cctb.gz` archive. Restore atomically with rollback on failure.
+
+```bash
+npm run dev -- telegram backup --instance work                 # Creates timestamped .cctb.gz
+npm run dev -- telegram backup --instance work --out ./bak.cctb.gz
+npm run dev -- telegram restore ./bak.cctb.gz --instance work  # Restore (instance must not exist)
+npm run dev -- telegram restore ./bak.cctb.gz --instance work --force  # Overwrite existing
+```
+
+The archive format is a pure-Node gzipped binary — no `tar` dependency, works on Windows/macOS/Linux identically.
+
+---
+
 ## Quick Start
 
 ### Prerequisites
@@ -306,8 +359,28 @@ Telegram Update → Normalize → Access Check → Chat Queue (serialized)
   </tr>
   <tr>
     <td>
+      <h3>Budget Control</h3>
+      <p>Set a per-instance cost cap. Requests are blocked when the limit is hit — with bilingual messages.</p>
+    </td>
+    <td>
+      <h3>Localization (en/zh)</h3>
+      <p>All bot replies, errors, and status messages can be switched to Chinese per instance.</p>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <h3>Backup & Restore</h3>
+      <p>One command to archive or restore an instance. Zero-dependency binary format, cross-platform, with atomic rollback.</p>
+    </td>
+    <td>
+      <h3>Instance Management</h3>
+      <p>List, rename, and delete instances from the CLI. Running-instance guards prevent data corruption.</p>
+    </td>
+  </tr>
+  <tr>
+    <td>
       <h3>Full Audit Trail</h3>
-      <p>Every action recorded per-instance in append-only JSONL — filterable by type, chat, and outcome.</p>
+      <p>Every action recorded per-instance in append-only JSONL — filterable by type, chat, and outcome. Auto-rotated at 10MB.</p>
     </td>
     <td>
       <h3>Docker Ready</h3>
@@ -332,6 +405,13 @@ Telegram Update → Normalize → Access Check → Chat Queue (serialized)
 | `telegram yolo [on\|off\|unsafe]` | Toggle auto-approval mode |
 | `telegram usage` | Show token usage and estimated cost |
 | `telegram verbosity [0\|1\|2]` | Set streaming progress level |
+| `telegram budget [show\|set\|clear]` | Per-instance cost cap (blocks requests when exceeded) |
+| `telegram locale [en\|zh]` | Set bot UI language per instance |
+| `telegram instance [list\|rename\|delete]` | Manage instances from the CLI |
+| `telegram backup [--instance <name>]` | Archive instance state to `.cctb.gz` |
+| `telegram restore <archive>` | Restore instance from backup (with `--force` to overwrite) |
+| `telegram logs rotate` | Manually trigger log rotation |
+| `telegram dashboard` | Generate and open an HTML status dashboard |
 | `telegram help` | Show all available commands |
 
 All commands accept `--instance <name>` to target a specific bot.

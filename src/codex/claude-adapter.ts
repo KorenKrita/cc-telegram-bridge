@@ -30,6 +30,7 @@ type ClaudeChildProcess = {
   stdin?: Writable;
   stdout?: ProcessStreamLike;
   stderr?: ProcessStreamLike;
+  kill?: (signal?: string) => void;
   once(event: "error", listener: (error: Error) => void): void;
   once(event: "close", listener: (code: number | null) => void): void;
 };
@@ -261,10 +262,19 @@ export class ProcessClaudeAdapter implements CodexAdapter {
       windowsHide: true,
     });
 
+    const TIMEOUT_MS = 5 * 60 * 1000;
     return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
       let stdout = "";
       let stderr = "";
       let settled = false;
+
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          child.kill?.();
+          reject(new Error("Engine execution timed out after 5 minutes"));
+        }
+      }, TIMEOUT_MS);
 
       const resolveOnce = (value: { stdout: string; stderr: string }) => {
         if (settled) {
@@ -272,6 +282,7 @@ export class ProcessClaudeAdapter implements CodexAdapter {
         }
 
         settled = true;
+        clearTimeout(timer);
         resolve(value);
       };
 
@@ -281,6 +292,7 @@ export class ProcessClaudeAdapter implements CodexAdapter {
         }
 
         settled = true;
+        clearTimeout(timer);
         reject(error);
       };
 
@@ -304,7 +316,6 @@ export class ProcessClaudeAdapter implements CodexAdapter {
         rejectOnce(new Error(stderr.trim() || `claude exited with code ${code}`));
       });
 
-      // Write prompt to stdin
       child.stdin?.write(stdinContent, () => {
         child.stdin?.end();
       });

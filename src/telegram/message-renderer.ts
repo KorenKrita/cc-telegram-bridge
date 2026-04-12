@@ -140,7 +140,7 @@ export function renderCategorizedErrorMessage(category: FailureCategory, detail:
     if (category === "unknown") {
       return "错误：发生了意外故障，请重置聊天或重试请求。";
     }
-    return renderErrorMessage(detail, locale);
+    return "错误：发生了意外故障，请重试。";
   }
 
   if (category === "write-permission") {
@@ -171,7 +171,7 @@ export function renderCategorizedErrorMessage(category: FailureCategory, detail:
     return "Error: An unexpected failure occurred. Reset the chat or retry the request.";
   }
 
-  return renderErrorMessage(detail);
+  return "Error: An unexpected failure occurred. Please retry.";
 }
 
 export function renderAccessCheckMessage(locale: Locale = "en"): string {

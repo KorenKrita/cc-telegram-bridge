@@ -1395,7 +1395,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -1403,7 +1403,7 @@ describe("polling helpers", () => {
             sourceFiles: ["repo.zip"],
             derivedFiles: [],
             summary: "archive summary one",
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:00:00.000Z",
           },
@@ -1478,7 +1478,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -1486,7 +1486,7 @@ describe("polling helpers", () => {
             sourceFiles: ["repo.zip"],
             derivedFiles: [],
             summary: "archive summary one",
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:00:00.000Z",
           },
@@ -1554,7 +1554,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -1562,7 +1562,7 @@ describe("polling helpers", () => {
             sourceFiles: ["repo.zip"],
             derivedFiles: [],
             summary: "archive summary one",
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:00:00.000Z",
           },
@@ -1623,11 +1623,11 @@ describe("polling helpers", () => {
         id: "cb-1",
         from: { id: 456 },
         message: { message_id: 11, chat: { id: 123, type: "private" }, text: "Archive summary" },
-        data: "continue-archive:archive-1",
+        data: "continue-archive:a0000000-0000-0000-0000-000000000001",
       },
     });
 
-    expect(normalized).toEqual(expect.objectContaining({ text: "/continue --upload archive-1" }));
+    expect(normalized).toEqual(expect.objectContaining({ text: "/continue --upload a0000000-0000-0000-0000-000000000001" }));
     expect(normalized?.replyContext).toBeUndefined();
   });
 
@@ -1639,7 +1639,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -1647,12 +1647,12 @@ describe("polling helpers", () => {
             sourceFiles: ["repo.zip"],
             derivedFiles: [],
             summary: "archive summary one",
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:00:00.000Z",
           },
           {
-            uploadId: "archive-2",
+            uploadId: "b0000000-0000-0000-0000-000000000002",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -1660,7 +1660,7 @@ describe("polling helpers", () => {
             sourceFiles: ["repo-2.zip"],
             derivedFiles: [],
             summary: "archive summary two",
-            extractedPath: "workspace/.telegram-files/archive-2/extracted",
+            extractedPath: "workspace/.telegram-files/b0000000-0000-0000-0000-000000000002/extracted",
             createdAt: "2026-04-10T00:01:00.000Z",
             updatedAt: "2026-04-10T00:01:00.000Z",
           },
@@ -1685,7 +1685,7 @@ describe("polling helpers", () => {
         id: "cb-1",
         from: { id: 456 },
         message: { message_id: 11, chat: { id: 123, type: "private" }, text: "Archive summary" },
-        data: "continue-archive:archive-1",
+        data: "continue-archive:a0000000-0000-0000-0000-000000000001",
       },
     });
 
@@ -1745,7 +1745,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -1753,7 +1753,7 @@ describe("polling helpers", () => {
             sourceFiles: ["repo.zip"],
             derivedFiles: [],
             summary: "archive summary one",
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:00:00.000Z",
           },
@@ -1778,7 +1778,7 @@ describe("polling helpers", () => {
         id: "cb-1",
         from: { id: 456 },
         message: { message_id: 11, chat: { id: 123, type: "private" }, text: "Archive summary" },
-        data: "continue-archive:archive-1",
+        data: "continue-archive:a0000000-0000-0000-0000-000000000001",
       },
     });
 
@@ -1814,7 +1814,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -1823,12 +1823,12 @@ describe("polling helpers", () => {
             derivedFiles: [],
             summary: "archive summary one",
             summaryMessageId: 41,
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:00:00.000Z",
           },
           {
-            uploadId: "archive-2",
+            uploadId: "b0000000-0000-0000-0000-000000000002",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -1837,7 +1837,7 @@ describe("polling helpers", () => {
             derivedFiles: [],
             summary: "archive summary two",
             summaryMessageId: 42,
-            extractedPath: "workspace/.telegram-files/archive-2/extracted",
+            extractedPath: "workspace/.telegram-files/b0000000-0000-0000-0000-000000000002/extracted",
             createdAt: "2026-04-10T00:01:00.000Z",
             updatedAt: "2026-04-10T00:01:00.000Z",
           },
@@ -1900,7 +1900,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -1909,12 +1909,12 @@ describe("polling helpers", () => {
             derivedFiles: [],
             summary: "archive summary one",
             summaryMessageId: 41,
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:02:00.000Z",
           },
           {
-            uploadId: "archive-2",
+            uploadId: "b0000000-0000-0000-0000-000000000002",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -1923,7 +1923,7 @@ describe("polling helpers", () => {
             derivedFiles: [],
             summary: "archive summary two",
             summaryMessageId: 42,
-            extractedPath: "workspace/.telegram-files/archive-2/extracted",
+            extractedPath: "workspace/.telegram-files/b0000000-0000-0000-0000-000000000002/extracted",
             createdAt: "2026-04-10T00:01:00.000Z",
             updatedAt: "2026-04-10T00:01:00.000Z",
           },
@@ -1983,7 +1983,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -1992,7 +1992,7 @@ describe("polling helpers", () => {
             derivedFiles: [],
             summary: "archive summary one",
             summaryMessageId: 41,
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:01:00.000Z",
           },
@@ -2017,7 +2017,7 @@ describe("polling helpers", () => {
         id: "cb-1",
         from: { id: 456 },
         message: { message_id: 41, chat: { id: 123, type: "private" }, text: "Archive summary" },
-        data: "continue-archive:archive-1",
+        data: "continue-archive:a0000000-0000-0000-0000-000000000001",
       },
     });
 
@@ -2048,7 +2048,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -2057,7 +2057,7 @@ describe("polling helpers", () => {
             derivedFiles: [],
             summary: "archive summary one",
             summaryMessageId: 41,
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:00:00.000Z",
           },
@@ -2082,7 +2082,7 @@ describe("polling helpers", () => {
         id: "cb-1",
         from: { id: 456 },
         message: { message_id: 41, chat: { id: 123, type: "private" }, text: "Archive summary" },
-        data: "continue-archive:archive-1",
+        data: "continue-archive:a0000000-0000-0000-0000-000000000001",
       },
     });
 
@@ -2116,7 +2116,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -2125,7 +2125,7 @@ describe("polling helpers", () => {
             derivedFiles: [],
             summary: "archive summary one",
             summaryMessageId: 41,
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:00:00.000Z",
           },
@@ -2193,7 +2193,7 @@ describe("polling helpers", () => {
         id: "cb-1",
         from: { id: 456 },
         message: { message_id: 41, chat: { id: 123, type: "private" }, text: "Archive summary" },
-        data: "continue-archive:archive-1",
+        data: "continue-archive:a0000000-0000-0000-0000-000000000001",
       },
     });
 
@@ -2202,7 +2202,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -2211,7 +2211,7 @@ describe("polling helpers", () => {
             derivedFiles: [],
             summary: "archive summary one",
             summaryMessageId: 41,
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:00:00.000Z",
           },
@@ -2382,7 +2382,7 @@ describe("polling helpers", () => {
       JSON.stringify({
         records: [
           {
-            uploadId: "archive-1",
+            uploadId: "a0000000-0000-0000-0000-000000000001",
             chatId: 123,
             userId: 456,
             kind: "archive",
@@ -2390,7 +2390,7 @@ describe("polling helpers", () => {
             sourceFiles: ["repo.zip"],
             derivedFiles: [],
             summary: "archive summary one",
-            extractedPath: "workspace/.telegram-files/archive-1/extracted",
+            extractedPath: "workspace/.telegram-files/a0000000-0000-0000-0000-000000000001/extracted",
             createdAt: "2026-04-10T00:00:00.000Z",
             updatedAt: "2026-04-10T00:00:00.000Z",
           },

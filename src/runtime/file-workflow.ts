@@ -53,6 +53,8 @@ const MAX_TREE_LINES = 40;
 const ARCHIVE_CONTINUE_HINT = 'Reply "继续分析" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.';
 const TARGETED_ARCHIVE_RETRY_HINT = 'Retry this specific archive from its original summary: press Continue Analysis again there or reply "继续分析" to that summary.';
 const MAX_ARCHIVE_SUMMARY_DELIVERY_CHARS = 3900;
+const MAX_TOTAL_ARCHIVE_BYTES = 500 * 1024 * 1024;
+const MAX_ACTIVE_WORKFLOWS_PER_CHAT = 3;
 
 function resolveWorkspaceUploadsDir(stateDir: string): string {
   return path.join(stateDir, "workspace", ".telegram-files");
@@ -181,7 +183,18 @@ async function extractArchiveToDirectory(archivePath: string, targetDir: string)
   const targetRoot = path.resolve(targetDir);
   await mkdir(targetRoot, { recursive: true });
 
-  for (const entry of zip.getEntries()) {
+  const entries = zip.getEntries();
+  let totalBytes = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory) {
+      totalBytes += entry.header.size;
+      if (totalBytes > MAX_TOTAL_ARCHIVE_BYTES) {
+        throw new Error(`Archive exceeds maximum extraction size of ${MAX_TOTAL_ARCHIVE_BYTES / (1024 * 1024)}MB`);
+      }
+    }
+  }
+
+  for (const entry of entries) {
     const normalizedEntryPath = path.normalize(entry.entryName).replace(/^([/\\])+/, "");
     if (!normalizedEntryPath || normalizedEntryPath === ".") {
       continue;
@@ -265,7 +278,6 @@ async function summarizeArchive(archivePath: string, extractedRoot: string): Pro
 
   const summaryLines = [
     `Archive summary: ${path.basename(archivePath)}`,
-    `Extracted to: ${extractedRoot}`,
     `Files: ${fileCount}`,
     keyFiles.size > 0 ? `Key files: ${[...keyFiles].join(", ")}` : "Key files: none detected",
     topExtensions.length > 0
@@ -303,11 +315,10 @@ export function boundArchiveSummaryForTelegram(
   return `${summary.slice(0, prefixLimit).trimEnd()}${suffix}`;
 }
 
-function createArchiveFailureSummary(archivePath: string, extractedRoot: string, error: unknown): string {
+function createArchiveFailureSummary(archivePath: string, _extractedRoot: string, error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
   return [
     `Archive summary failed: ${path.basename(archivePath)}`,
-    `Extract path: ${extractedRoot}`,
     `Failure: ${detail}`,
   ].join("\n");
 }
@@ -326,8 +337,20 @@ export async function prepareAttachmentWorkflow(input: {
   const kinds = input.downloadedAttachments.map(classifyAttachment);
   const uniqueKinds = [...new Set(kinds)];
   const uploadId = randomUUID();
-  const stagedFiles = await stageAttachmentFiles(input.stateDir, uploadId, input.downloadedAttachments);
   const store = new FileWorkflowStore(input.stateDir);
+
+  const existingState = await store.load();
+  const activeForChat = existingState.records.filter(
+    (r) => r.chatId === input.chatId && (r.status === "preparing" || r.status === "processing"),
+  );
+  if (activeForChat.length >= MAX_ACTIVE_WORKFLOWS_PER_CHAT) {
+    return {
+      kind: "reply",
+      text: "Too many active file tasks for this chat. Wait for current tasks to finish or use /reset.",
+    };
+  }
+
+  const stagedFiles = await stageAttachmentFiles(input.stateDir, uploadId, input.downloadedAttachments);
   const now = new Date().toISOString();
 
   if (uniqueKinds.length === 1 && uniqueKinds[0] === "archive" && stagedFiles.length === 1) {

@@ -79,9 +79,13 @@ function normalizePhotoAttachment(message: any): NormalizedTelegramAttachment[] 
 
 export function normalizeUpdate(update: any): NormalizedTelegramMessage | null {
   const callbackQuery = update?.callback_query;
-  const callbackData =
+  const rawCallbackData =
     typeof callbackQuery?.data === "string" && callbackQuery.data.startsWith("continue-archive:")
       ? callbackQuery.data.slice("continue-archive:".length).trim()
+      : null;
+  const callbackData =
+    rawCallbackData && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawCallbackData)
+      ? rawCallbackData
       : null;
   if (callbackData) {
     const message = callbackQuery.message;

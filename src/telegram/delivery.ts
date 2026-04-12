@@ -568,6 +568,27 @@ export async function handleNormalizedTelegramMessage(
         cachedTokens: result.usage.cachedTokens,
         costUsd: result.usage.costUsd,
       });
+
+      try {
+        const cfgRaw2 = await readFile(path.join(stateDir, "config.json"), "utf8");
+        const cfg2 = JSON.parse(cfgRaw2) as { budgetUsd?: number };
+        if (typeof cfg2.budgetUsd === "number" && cfg2.budgetUsd > 0) {
+          const postUsage = await usageStore.load();
+          if (postUsage.totalCostUsd >= cfg2.budgetUsd) {
+            await appendAuditEventBestEffort(stateDir, {
+              type: "update.reply",
+              instanceName: context.instanceName,
+              chatId: normalized.chatId,
+              userId: normalized.userId,
+              updateId: context.updateId,
+              outcome: "reply",
+              detail: `budget threshold reached: $${postUsage.totalCostUsd.toFixed(4)} / $${cfg2.budgetUsd.toFixed(2)}`,
+            });
+          }
+        }
+      } catch {
+        // Budget post-check is best-effort
+      }
     }
 
     await deliverTelegramResponse(context.api, normalized.chatId, placeholderMessageId, result.text, () => {

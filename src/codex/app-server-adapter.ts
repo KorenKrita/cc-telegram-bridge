@@ -36,6 +36,7 @@ type AppServerChildProcess = {
 
 type SpawnCodex = (command: string, args: string[], options: SpawnOptions) => AppServerChildProcess;
 const MAX_INSTRUCTIONS_CHARS = 16_000;
+const MAX_LINE_BUFFER_BYTES = 1024 * 1024;
 
 type JsonRpcResponse = {
   id?: number;
@@ -256,6 +257,12 @@ export class CodexAppServerAdapter implements CodexAdapter {
 
   private handleStdout(chunk: string): void {
     this.lineBuffer += chunk;
+
+    if (this.lineBuffer.length > MAX_LINE_BUFFER_BYTES) {
+      this.failAllPending(new Error("Engine output exceeded maximum buffer size"));
+      this.child?.kill?.();
+      return;
+    }
 
     const lines = this.lineBuffer.split(/\r?\n/);
     this.lineBuffer = lines.pop() ?? "";
@@ -594,6 +601,13 @@ export class CodexAppServerAdapter implements CodexAdapter {
     }
 
     return { text: "" };
+  }
+
+  destroy(): void {
+    this.child?.kill?.();
+    this.failAllPending(new Error("Adapter destroyed"));
+    this.child = null;
+    this.initializePromise = null;
   }
 
   private failAllPending(error: Error): void {

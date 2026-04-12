@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import path from "node:path";
 
 import { resolveConfig, resolveInstanceStateDir, type EnvSource } from "./config.js";
@@ -232,6 +234,66 @@ function resolveSharedClaudeHome(env: Pick<EnvSource, "HOME" | "USERPROFILE">): 
   return homeDir;
 }
 
+function computeConfigDirHash(configDir: string): string {
+  return createHash("sha256").update(configDir).digest("hex").slice(0, 8);
+}
+
+function execFileAsync(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout: 5000 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+async function propagateMacOsKeychainCredential(engineHomePath: string): Promise<void> {
+  if (process.platform !== "darwin") {
+    return;
+  }
+
+  const resolvedPath = path.resolve(engineHomePath);
+  const hash = computeConfigDirHash(resolvedPath);
+  const targetService = `Claude Code-credentials-${hash}`;
+  const sourceService = "Claude Code-credentials";
+
+  try {
+    await execFileAsync("security", ["find-generic-password", "-s", targetService]);
+    return;
+  } catch {
+    // Target entry doesn't exist — proceed to propagate
+  }
+
+  let password: string;
+  try {
+    const result = await execFileAsync("security", [
+      "find-generic-password", "-s", sourceService, "-w",
+    ]);
+    password = result.stdout.trimEnd();
+    if (!password) {
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  const account = process.env.USER ?? "claude";
+  try {
+    await execFileAsync("security", [
+      "add-generic-password",
+      "-s", targetService,
+      "-a", account,
+      "-w", password,
+      "-U",
+    ]);
+  } catch {
+    // Keychain write failed (e.g. locked keychain) — user will need to run claude login manually
+  }
+}
+
 async function seedIsolatedClaudeConfig(
   env: Pick<EnvSource, "HOME" | "USERPROFILE">,
   engineHomePath: string,
@@ -245,6 +307,7 @@ async function seedIsolatedClaudeConfig(
   await Promise.all([
     copyIfExists(path.join(sharedClaudeHome, ".claude.json"), path.join(engineHomePath, ".claude.json")),
     copyIfExists(path.join(sharedClaudeHome, ".claude", ".credentials.json"), path.join(engineHomePath, ".credentials.json")),
+    propagateMacOsKeychainCredential(engineHomePath),
   ]);
 }
 

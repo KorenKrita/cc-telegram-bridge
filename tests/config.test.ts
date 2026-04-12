@@ -2,35 +2,37 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../src/config.js";
 
+const HOME_DIR = process.platform === "win32" ? "C:\\Users\\hangw" : "/home/hangw";
+const ALT_HOME = process.platform === "win32" ? "C:\\msys64\\home\\hangw" : "/alt/home/hangw";
+
 describe("resolveConfig", () => {
-  it("uses the default Windows-first state directory under the user profile", () => {
-    const config = resolveConfig({
-      USERPROFILE: "C:\\Users\\hangw",
-      TELEGRAM_BOT_TOKEN: "abc123",
-    });
+  it("uses the default state directory under the user profile", () => {
+    const env = process.platform === "win32"
+      ? { USERPROFILE: HOME_DIR, TELEGRAM_BOT_TOKEN: "abc123" }
+      : { HOME: HOME_DIR, TELEGRAM_BOT_TOKEN: "abc123" };
+    const config = resolveConfig(env);
 
     expect(config.instanceName).toBe("default");
-    expect(config.stateDir).toBe("C:\\Users\\hangw\\.cctb\\default");
-    expect(config.inboxDir).toBe("C:\\Users\\hangw\\.cctb\\default\\inbox");
+    expect(config.stateDir).toBe(path.join(HOME_DIR, ".cctb", "default"));
+    expect(config.inboxDir).toBe(path.join(HOME_DIR, ".cctb", "default", "inbox"));
     expect(config.telegramBotToken).toBe("abc123");
   });
 
-  it("prefers USERPROFILE over HOME on Windows-style paths", () => {
-    const config = resolveConfig({
-      HOME: "C:\\msys64\\home\\hangw",
-      USERPROFILE: "C:\\Users\\hangw",
-      TELEGRAM_BOT_TOKEN: "abc123",
-    });
+  it("prefers the primary home variable over the fallback", () => {
+    const env = process.platform === "win32"
+      ? { HOME: ALT_HOME, USERPROFILE: HOME_DIR, TELEGRAM_BOT_TOKEN: "abc123" }
+      : { HOME: HOME_DIR, USERPROFILE: ALT_HOME, TELEGRAM_BOT_TOKEN: "abc123" };
+    const config = resolveConfig(env);
 
-    expect(config.stateDir).toBe("C:\\Users\\hangw\\.cctb\\default");
+    expect(config.stateDir).toBe(path.join(HOME_DIR, ".cctb", "default"));
   });
 
-  it("throws when USERPROFILE is missing", () => {
+  it("throws when home directory is missing", () => {
     expect(() =>
       resolveConfig({
         TELEGRAM_BOT_TOKEN: "abc123",
       }),
-    ).toThrow("USERPROFILE or HOME is required");
+    ).toThrow("is required");
   });
 
   it("throws when TELEGRAM_BOT_TOKEN is missing", () => {
@@ -68,15 +70,14 @@ describe("resolveConfig", () => {
   });
 
   it("uses the named instance directory when CODEX_TELEGRAM_INSTANCE is set", () => {
-    const config = resolveConfig({
-      USERPROFILE: "C:\\Users\\hangw",
-      TELEGRAM_BOT_TOKEN: "abc123",
-      CODEX_TELEGRAM_INSTANCE: "alpha",
-    });
+    const env = process.platform === "win32"
+      ? { USERPROFILE: HOME_DIR, TELEGRAM_BOT_TOKEN: "abc123", CODEX_TELEGRAM_INSTANCE: "alpha" }
+      : { HOME: HOME_DIR, TELEGRAM_BOT_TOKEN: "abc123", CODEX_TELEGRAM_INSTANCE: "alpha" };
+    const config = resolveConfig(env);
 
     expect(config.instanceName).toBe("alpha");
-    expect(config.stateDir).toBe("C:\\Users\\hangw\\.cctb\\alpha");
-    expect(config.accessStatePath).toBe("C:\\Users\\hangw\\.cctb\\alpha\\access.json");
+    expect(config.stateDir).toBe(path.join(HOME_DIR, ".cctb", "alpha"));
+    expect(config.accessStatePath).toBe(path.join(HOME_DIR, ".cctb", "alpha", "access.json"));
   });
 
   it("rejects unsafe instance names", () => {
@@ -90,15 +91,15 @@ describe("resolveConfig", () => {
   });
 
   it("defaults the codex executable to codex", () => {
-    const config = resolveConfig({
-      USERPROFILE: "C:\\Users\\missing-user",
-      TELEGRAM_BOT_TOKEN: "abc123",
-    });
+    const env = process.platform === "win32"
+      ? { USERPROFILE: "C:\\Users\\missing-user", TELEGRAM_BOT_TOKEN: "abc123" }
+      : { HOME: "/nonexistent", TELEGRAM_BOT_TOKEN: "abc123" };
+    const config = resolveConfig(env);
 
     expect(config.codexExecutable).toBe("codex");
   });
 
-  it("prefers the installed Windows codex shim when available", () => {
+  it.skipIf(process.platform !== "win32")("prefers the installed Windows codex shim when available", () => {
     const config = resolveConfig({
       USERPROFILE: "C:\\Users\\hangw",
       APPDATA: "C:\\Users\\hangw\\AppData\\Roaming",

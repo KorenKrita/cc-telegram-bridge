@@ -7,7 +7,9 @@ import { describe, expect, it, vi } from "vitest";
 import { runCli } from "../src/commands/cli.js";
 import { resolveInstanceLockPath } from "../src/state/instance-lock.js";
 
-const REPO_ROOT = "C:\\Users\\hangw\\codex-telegram-channel";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("telegram service commands", () => {
   it("starts a named instance through the CLI", async () => {

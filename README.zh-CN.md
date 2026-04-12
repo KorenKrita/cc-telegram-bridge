@@ -16,10 +16,14 @@
 </p>
 
 <h3 align="center">
-  在 Telegram 上运行 AI 编程 agent 舰队 — 由 Codex 或 Claude Code 驱动。<br>
-  每个 bot 拥有独立的引擎、人格、状态和访问控制。<br>
-  <sub>类似 <a href="https://github.com/openclaw">OpenClaw</a> 的体验，但专为 Codex 和 Claude 设计。</sub>
+  把真正的 Codex 和 Claude Code CLI 搬到 Telegram。<br>
+  不是 API 封装 — 是原生 CLI，带会话、记忆和文件处理。<br>
+  多 bot 并行，每个拥有独立的引擎、人格和隔离状态。
 </h3>
+
+<p align="center">
+  <em>当你能在 Telegram 上开 10 个 bot，谁还打开浏览器用 <a href="https://github.com/openclaw">OpenClaw</a>？</em>
+</p>
 
 <p align="center">
   <a href="#双引擎codex--claude-code">双引擎</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#多-bot-部署">多 Bot</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#agent-指令">agent.md</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#yolo-模式">YOLO</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#预算控制">预算</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#国际化">i18n</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#备份与恢复">备份</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#快速开始">快速开始</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#服务运维">运维</a>

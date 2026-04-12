@@ -16,10 +16,14 @@
 </p>
 
 <h3 align="center">
-  Run a fleet of AI coding agents on Telegram — powered by Codex or Claude Code.<br>
-  Each bot gets its own engine, personality, state, and access control.<br>
-  <sub>Think <a href="https://github.com/openclaw">OpenClaw</a>, but for Codex and Claude over Telegram.</sub>
+  Put the real Codex and Claude Code CLI on Telegram.<br>
+  Not an API wrapper — the actual CLI, with sessions, memory, and file handling.<br>
+  Run multiple bots, each with its own engine, personality, and isolated state.
 </h3>
+
+<p align="center">
+  <em>When you can spin up 10 bots on Telegram, who still opens a browser for <a href="https://github.com/openclaw">OpenClaw</a>?</em>
+</p>
 
 <p align="center">
   <a href="#dual-engine-codex--claude-code">Dual Engine</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#multi-bot-setup">Multi-Bot</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#agent-instructions">agent.md</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#yolo-mode">YOLO</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#budget-control">Budget</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#localization">i18n</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#backup--restore">Backup</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#quick-start">Quick Start</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#service-operations">Ops</a>

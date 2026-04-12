@@ -22,7 +22,7 @@
 </h3>
 
 <p align="center">
-  <em>Why not use a better harness for Claude Code and Codex?<br>When you can spin up 10 native bots on Telegram, who still needs <a href="https://github.com/openclaw">OpenClaw</a>?</em>
+  <em>Why not use Claude Code and Codex's own harness? Better, stronger, more stable.<br>When you can spin up 10 native bots on Telegram, who still needs <a href="https://github.com/openclaw">OpenClaw</a>?</em>
 </p>
 
 <p align="center">

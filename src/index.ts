@@ -7,6 +7,9 @@ import {
   pollTelegramUpdates,
   resolveServiceEnvForInstance,
 } from "./service.js";
+import { loadBusConfig } from "./bus/bus-config.js";
+import { createBusServer, startBusServer, stopBusServer, type BusTalkRequest, type BusTalkResponse } from "./bus/bus-server.js";
+import { registerInstance, deregisterInstance, resolveChannelRoot } from "./bus/bus-registry.js";
 
 async function main(): Promise<void> {
   try {
@@ -47,9 +50,52 @@ async function main(): Promise<void> {
     process.once("SIGINT", shutdown);
 
     const { api, bridge, config } = await createServiceDependencies(resolvedEnv);
+
+    let busServer: ReturnType<typeof createBusServer> | null = null;
+    const channelRoot = resolveChannelRoot(config.stateDir);
+    const busConfig = await loadBusConfig(config.stateDir);
+
+    if (busConfig) {
+      const handler = async (req: BusTalkRequest): Promise<BusTalkResponse> => {
+        const startedAt = Date.now();
+        try {
+          const result = await bridge.handleAuthorizedMessage({
+            chatId: 0,
+            userId: 0,
+            chatType: "bus",
+            text: req.prompt,
+            files: [],
+          });
+          return {
+            success: true,
+            text: result.text,
+            fromInstance: instanceName,
+            durationMs: Date.now() - startedAt,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            text: "",
+            fromInstance: instanceName,
+            error: error instanceof Error ? error.message : String(error),
+            durationMs: Date.now() - startedAt,
+          };
+        }
+      };
+
+      busServer = createBusServer(instanceName, config.stateDir, handler);
+      const boundPort = await startBusServer(busServer, busConfig.port);
+      await registerInstance(channelRoot, instanceName, boundPort);
+      console.log(`Bus server listening on 127.0.0.1:${boundPort}`);
+    }
+
     try {
       await pollTelegramUpdates(api, bridge, config.inboxDir, console, abortController.signal);
     } finally {
+      if (busServer) {
+        await stopBusServer(busServer);
+        await deregisterInstance(channelRoot, instanceName);
+      }
       process.removeListener("SIGTERM", shutdown);
       process.removeListener("SIGINT", shutdown);
       process.removeListener("exit", releaseLockOnExit);

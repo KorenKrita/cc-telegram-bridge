@@ -21,6 +21,7 @@ import { UsageStore } from "../state/usage-store.js";
 import { readFile } from "node:fs/promises";
 import { SessionStore } from "../state/session-store.js";
 import { SessionStateError } from "../runtime/session-manager.js";
+import { delegateToInstance } from "../bus/bus-client.js";
 
 interface InstanceConfig {
   engine: "codex" | "claude";
@@ -107,6 +108,14 @@ function isHelpCommand(text: string): boolean {
 
 function isStatusCommand(text: string): boolean {
   return /^\/status(?:@\w+)?(?:\s|$)/i.test(text.trim());
+}
+
+function parseAskCommand(text: string): { targetInstance: string; prompt: string } | null {
+  const match = text.trim().match(/^\/ask(?:@\w+)?\s+(\S+)\s+([\s\S]+)$/i);
+  if (!match) {
+    return null;
+  }
+  return { targetInstance: match[1]!, prompt: match[2]!.trim() };
 }
 
 function isBlockingWorkflowStatus(status: "preparing" | "processing" | "awaiting_continue" | "completed" | "failed"): boolean {
@@ -392,6 +401,47 @@ export async function handleNormalizedTelegramMessage(
           attachments: normalized.attachments.length,
           responseChars: statusMessage.length,
           chunkCount: chunkTelegramMessage(statusMessage).length,
+        },
+      });
+      return;
+    }
+
+    const askCommand = parseAskCommand(normalized.text);
+    if (askCommand) {
+      const askLabel = locale === "zh"
+        ? `正在转发给 ${askCommand.targetInstance}...`
+        : `Delegating to ${askCommand.targetInstance}...`;
+      await context.api.editMessage(normalized.chatId, placeholderMessageId, askLabel);
+
+      const result = await delegateToInstance({
+        fromInstance: context.instanceName ?? "default",
+        targetInstance: askCommand.targetInstance,
+        prompt: askCommand.prompt,
+        depth: 0,
+        stateDir,
+      });
+
+      const askResponse = locale === "zh"
+        ? `[来自 ${askCommand.targetInstance}]\n\n${result.text}`
+        : `[From ${askCommand.targetInstance}]\n\n${result.text}`;
+      const chunks = chunkTelegramMessage(askResponse);
+      await context.api.editMessage(normalized.chatId, placeholderMessageId, chunks[0]!);
+      placeholderShowsResponse = true;
+      for (const chunk of chunks.slice(1)) {
+        await context.api.sendMessage(normalized.chatId, chunk);
+      }
+
+      await appendAuditEventBestEffort(stateDir, {
+        type: "update.handle",
+        instanceName: context.instanceName,
+        chatId: normalized.chatId,
+        userId: normalized.userId,
+        updateId: context.updateId,
+        outcome: "success",
+        metadata: {
+          durationMs: Date.now() - startedAt,
+          delegatedTo: askCommand.targetInstance,
+          responseChars: askResponse.length,
         },
       });
       return;

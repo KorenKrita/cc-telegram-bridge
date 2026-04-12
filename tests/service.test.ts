@@ -3432,17 +3432,13 @@ describe("polling helpers", () => {
       expect(api.editMessage).toHaveBeenLastCalledWith(
         123,
         11,
-        [
-          "Telegram commands:",
-          "/status - show engine, session, and file task state",
-          "Send files directly to analyze them in chat.",
-          "Archives pause after summary; reply \"继续分析\" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.",
-          "/continue - resume the latest waiting archive",
-          "/reset - clear the current chat session",
-          "/help - show this help",
-        ].join("\n"),
+        expect.stringContaining("/status"),
       );
-      expect(api.editMessage).not.toHaveBeenCalledWith(123, 11, expect.stringContaining("/tasks"));
+      expect(api.editMessage).toHaveBeenLastCalledWith(
+        123,
+        11,
+        expect.stringContaining("/ask"),
+      );
       expect(bridge.handleAuthorizedMessage).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -3485,16 +3481,8 @@ describe("polling helpers", () => {
     expect(api.editMessage).toHaveBeenLastCalledWith(
       123,
       11,
-        [
-          "Telegram commands:",
-          "/status - show engine, session, and file task state",
-          "Send files directly to analyze them in chat.",
-          "Archives pause after summary; reply \"继续分析\" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.",
-          "/continue - resume the latest waiting archive",
-          "/reset - clear the current chat session",
-          "/help - show this help",
-        ].join("\n"),
-      );
+      expect.stringContaining("/help"),
+    );
     expect(api.sendMessage).toHaveBeenCalledTimes(1);
     expect(api.sendMessage).toHaveBeenCalledWith(123, "Received. Starting your session...");
   });

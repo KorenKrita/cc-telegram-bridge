@@ -51,6 +51,7 @@ export function renderTelegramHelpMessage(locale: Locale = "en"): string {
     return [
       "Telegram 命令：",
       "/status - 显示引擎、会话和文件任务状态",
+      "/ask <实例> <提示> - 将任务委托给另一个 bot",
       "直接发送文件进行分析。",
       "压缩包在摘要后会暂停；回复\"继续分析\"或点击 Continue Analysis 按钮继续。裸 /continue 恢复最近一个等待中的压缩包。",
       "/continue - 恢复最近等待的压缩包",
@@ -61,6 +62,7 @@ export function renderTelegramHelpMessage(locale: Locale = "en"): string {
   return [
     "Telegram commands:",
     "/status - show engine, session, and file task state",
+    "/ask <instance> <prompt> - delegate a task to another bot",
     "Send files directly to analyze them in chat.",
     "Archives pause after summary; reply \"继续分析\" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.",
     "/continue - resume the latest waiting archive",

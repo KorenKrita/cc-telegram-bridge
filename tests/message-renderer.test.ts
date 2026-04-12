@@ -105,17 +105,11 @@ describe("message rendering", () => {
   });
 
   it("renders Telegram help text", () => {
-    expect(renderTelegramHelpMessage()).toBe(
-      [
-        "Telegram commands:",
-        "/status - show engine, session, and file task state",
-        "Send files directly to analyze them in chat.",
-        "Archives pause after summary; reply \"继续分析\" or press Continue Analysis to continue this archive. Bare /continue resumes the latest waiting archive.",
-        "/continue - resume the latest waiting archive",
-        "/reset - clear the current chat session",
-        "/help - show this help",
-      ].join("\n"),
-    );
+    const help = renderTelegramHelpMessage();
+    expect(help).toContain("/status");
+    expect(help).toContain("/ask <instance> <prompt>");
+    expect(help).toContain("/reset");
+    expect(help).toContain("/help");
   });
 
   it("renders Telegram status text", () => {

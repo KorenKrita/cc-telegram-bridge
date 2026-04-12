@@ -12,6 +12,7 @@ type SpawnOptions = {
   stdio: ["pipe", "pipe", "pipe"];
   shell?: boolean;
   env?: NodeJS.ProcessEnv;
+  cwd?: string;
   windowsHide?: boolean;
 };
 
@@ -213,6 +214,7 @@ export class ProcessCodexAdapter implements CodexAdapter {
     instructionsPath?: string,
     configPath?: string,
     engineHomePath?: string,
+    private readonly workspacePath?: string,
   ) {
     this.childEnv =
       typeof childEnvOrSpawn === "function"
@@ -345,6 +347,7 @@ export class ProcessCodexAdapter implements CodexAdapter {
       stdio: ["pipe", "pipe", "pipe"],
       shell: invocation.shell,
       env: this.childEnv,
+      cwd: this.workspacePath,
       windowsHide: true,
     });
 

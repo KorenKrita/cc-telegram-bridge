@@ -50,7 +50,7 @@ npm run dev -- telegram engine --instance review-bot
 | 会话恢复 | `codex exec resume --json <id>` | `claude -p -r <session-id>` |
 | 项目指令 | `agent.md`（注入到 prompt） | `agent.md`（`--system-prompt`）+ `CLAUDE.md`（工作目录自动加载） |
 | YOLO 模式 | `--full-auto` / `--dangerously-bypass-*` | `--permission-mode bypassPermissions` / `--dangerously-skip-permissions` |
-| 工作目录 | 无 | 实例目录下的 `workspace/`（放 `CLAUDE.md`） |
+| 工作目录 | 实例目录下的 `workspace/` | 实例目录下的 `workspace/`（放 `CLAUDE.md`） |
 
 ### Claude 引擎：CLAUDE.md 支持
 

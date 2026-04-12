@@ -336,10 +336,11 @@ async function createAdapter(
 
   if (resolveEngineRuntime(engine, approvalMode) === "app-server") {
     const engineHomePath = path.join(config.stateDir, "engine-home");
+    await mkdir(workspacePath, { recursive: true });
     await seedIsolatedCodexHome(env, engineHomePath);
     return new CodexAppServerAdapter(
       config.codexExecutable,
-      process.cwd(),
+      workspacePath,
       undefined,
       undefined,
       instructionsPath,
@@ -348,8 +349,9 @@ async function createAdapter(
   }
 
   const engineHomePath = path.join(config.stateDir, "engine-home");
+  await mkdir(workspacePath, { recursive: true });
   await seedIsolatedCodexHome(env, engineHomePath);
-  return new ProcessCodexAdapter(config.codexExecutable, undefined, undefined, instructionsPath, configPath, engineHomePath);
+  return new ProcessCodexAdapter(config.codexExecutable, undefined, undefined, instructionsPath, configPath, engineHomePath, workspacePath);
 }
 
 export async function createServiceDependencies(env: EnvSource): Promise<{ config: ReturnType<typeof resolveConfig>; api: TelegramApi; bridge: Bridge }> {

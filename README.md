@@ -50,7 +50,7 @@ npm run dev -- telegram engine --instance review-bot
 | Session resume | `codex exec resume --json <id>` | `claude -p -r <session-id>` |
 | Project instructions | `agent.md` (prepended to prompt) | `agent.md` (via `--system-prompt`) + `CLAUDE.md` (auto-loaded from workspace) |
 | YOLO mode | `--full-auto` / `--dangerously-bypass-approvals-and-sandbox` | `--permission-mode bypassPermissions` / `--dangerously-skip-permissions` |
-| Working directory | N/A | `workspace/` under instance dir (with `CLAUDE.md`) |
+| Working directory | `workspace/` under instance dir | `workspace/` under instance dir (with `CLAUDE.md`) |
 
 ### Claude Engine: CLAUDE.md Support
 

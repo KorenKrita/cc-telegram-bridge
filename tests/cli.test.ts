@@ -7,6 +7,9 @@ import { describe, expect, it, vi } from "vitest";
 import { AccessStore } from "../src/state/access-store.js";
 import { runCli } from "../src/commands/cli.js";
 import { SessionStore } from "../src/state/session-store.js";
+import { createArchive } from "../src/state/archive.js";
+
+const REPO_ROOT = "C:\\Users\\hangw\\codex-telegram-channel";
 
 describe("runCli", () => {
   it("configures the default instance", async () => {
@@ -255,6 +258,113 @@ describe("runCli", () => {
       expect(handled).toBe(true);
       expect(messages[0]).toContain("Chat: 84");
       expect(messages[0]).toContain("Thread: thread-123");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects renaming a running instance", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+
+    try {
+      const stateDir = path.join(tempDir, ".codex", "channels", "telegram", "alpha");
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(
+        path.join(stateDir, "instance.lock.json"),
+        JSON.stringify({ pid: 12345, token: "token", acquiredAt: new Date().toISOString() }),
+        "utf8",
+      );
+
+      await expect(
+        runCli(["telegram", "instance", "rename", "alpha", "beta"], {
+          env: { USERPROFILE: tempDir },
+          serviceDeps: {
+            cwd: REPO_ROOT,
+            isProcessAlive: (pid) => pid === 12345,
+            isExpectedServiceProcess: (pid) => pid === 12345,
+          },
+        }),
+      ).rejects.toThrow('Stop instance "alpha" before renaming it.');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects deleting a running instance", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+
+    try {
+      const stateDir = path.join(tempDir, ".codex", "channels", "telegram", "alpha");
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(
+        path.join(stateDir, "instance.lock.json"),
+        JSON.stringify({ pid: 12345, token: "token", acquiredAt: new Date().toISOString() }),
+        "utf8",
+      );
+
+      await expect(
+        runCli(["telegram", "instance", "delete", "alpha", "--yes"], {
+          env: { USERPROFILE: tempDir },
+          serviceDeps: {
+            cwd: REPO_ROOT,
+            isProcessAlive: (pid) => pid === 12345,
+            isExpectedServiceProcess: (pid) => pid === 12345,
+          },
+        }),
+      ).rejects.toThrow('Stop instance "alpha" before deleting it.');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not delete an existing instance before restore validation succeeds", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+
+    try {
+      const stateDir = path.join(tempDir, ".codex", "channels", "telegram", "alpha");
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(path.join(stateDir, "keep.txt"), "keep-me", "utf8");
+
+      const badArchivePath = path.join(tempDir, "bad.cctb.gz");
+      await writeFile(badArchivePath, "not-an-archive", "utf8");
+
+      await expect(
+        runCli(["telegram", "restore", badArchivePath, "--instance", "alpha", "--force"], {
+          env: { USERPROFILE: tempDir },
+        }),
+      ).rejects.toThrow();
+
+      await expect(readFile(path.join(stateDir, "keep.txt"), "utf8")).resolves.toBe("keep-me");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("restores over an existing instance by validating first and then replacing it", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      const channelsDir = path.join(tempDir, ".codex", "channels", "telegram");
+      const sourceDir = path.join(channelsDir, "source");
+      const targetDir = path.join(channelsDir, "alpha");
+      await mkdir(sourceDir, { recursive: true });
+      await mkdir(targetDir, { recursive: true });
+      await writeFile(path.join(sourceDir, "access.json"), JSON.stringify({ allowlist: [1] }), "utf8");
+      await writeFile(path.join(targetDir, "stale.txt"), "old", "utf8");
+
+      const archivePath = path.join(tempDir, "backup.cctb.gz");
+      await createArchive(sourceDir, archivePath);
+
+      const handled = await runCli(["telegram", "restore", archivePath, "--instance", "alpha", "--force"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+      });
+
+      expect(handled).toBe(true);
+      await expect(readFile(path.join(targetDir, "access.json"), "utf8")).resolves.toContain('"allowlist"');
+      await expect(readFile(path.join(targetDir, "stale.txt"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      expect(messages[0]).toContain('Restored instance "alpha"');
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

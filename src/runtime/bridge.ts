@@ -1,5 +1,6 @@
 import type { CodexAdapter } from "../codex/adapter.js";
 import {
+  type Locale,
   renderPairingMessage,
   renderPrivateChatRequiredMessage,
   renderUnauthorizedMessage,
@@ -33,6 +34,7 @@ export interface BridgeAccessInput {
   chatId: number;
   userId: number;
   chatType: string;
+  locale?: Locale;
 }
 
 export interface BridgeAccessDecision {
@@ -97,14 +99,14 @@ export class Bridge {
     if (input.chatType !== "private") {
       return {
         kind: "reply",
-        text: renderPrivateChatRequiredMessage(),
+        text: renderPrivateChatRequiredMessage(input.locale),
       };
     }
 
     if (accessState.policy === "allowlist" && !accessState.allowlist.includes(input.chatId)) {
       return {
         kind: "deny",
-        text: renderUnauthorizedMessage(),
+        text: renderUnauthorizedMessage(input.locale),
       };
     }
 
@@ -122,7 +124,7 @@ export class Bridge {
 
       return {
         kind: "reply",
-        text: renderPairingMessage(pendingPair.code),
+        text: renderPairingMessage(pendingPair.code, input.locale),
       };
     }
 
@@ -133,6 +135,7 @@ export class Bridge {
     chatId: number;
     userId: number;
     chatType: string;
+    locale?: Locale;
     text: string;
     replyContext?: {
       messageId: number;
@@ -144,11 +147,11 @@ export class Bridge {
   }) {
     const decision = await this.checkAccess(input);
     if (decision.kind === "deny") {
-      throw new Error(decision.text ?? renderUnauthorizedMessage());
+      throw new Error(decision.text ?? renderUnauthorizedMessage(input.locale));
     }
     if (decision.kind === "reply") {
       return {
-        text: decision.text ?? renderUnauthorizedMessage(),
+        text: decision.text ?? renderUnauthorizedMessage(input.locale),
       };
     }
 

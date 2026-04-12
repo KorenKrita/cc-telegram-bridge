@@ -131,7 +131,8 @@ export async function extractArchive(archivePath: string, destinationRoot: strin
     }
     const fullPath = path.join(targetRoot, file.path);
     const resolved = path.resolve(fullPath);
-    if (!resolved.startsWith(path.resolve(targetRoot) + path.sep) && resolved !== path.resolve(targetRoot)) {
+    const relativeToRoot = path.relative(path.resolve(targetRoot), resolved);
+    if (relativeToRoot === "" || relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot)) {
       throw new Error(`Archive path escapes target: ${file.path}`);
     }
     await mkdir(path.dirname(fullPath), { recursive: true });

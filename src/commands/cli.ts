@@ -970,6 +970,7 @@ async function runInstanceCommand(
   argv: string[],
   env: InstanceTokenEnv,
   logger: CliLogger,
+  serviceDeps: ServiceCommandDeps = {},
 ): Promise<boolean> {
   const sub = argv[1];
   const fs = await import("node:fs/promises");
@@ -1013,6 +1014,10 @@ async function runInstanceCommand(
     }
     const oldName = normalizeInstanceName(argv[2]);
     const newName = normalizeInstanceName(argv[3]);
+    const runningStatus = await getServiceStatus(env, oldName, serviceDeps);
+    if (runningStatus.running) {
+      throw new Error(`Stop instance "${oldName}" before renaming it.`);
+    }
     const oldDir = path.join(channelsDir, oldName);
     const newDir = path.join(channelsDir, newName);
     try { await fs.access(newDir); throw new Error(`Instance "${newName}" already exists.`); } catch (e) {
@@ -1031,6 +1036,10 @@ async function runInstanceCommand(
     const confirmed = argv.includes("--yes");
     if (!confirmed) {
       throw new Error(`Add --yes to confirm deletion of instance "${name}". This cannot be undone.`);
+    }
+    const runningStatus = await getServiceStatus(env, name, serviceDeps);
+    if (runningStatus.running) {
+      throw new Error(`Stop instance "${name}" before deleting it.`);
     }
     const dir = path.join(channelsDir, name);
     await fs.rm(dir, { recursive: true, force: true });
@@ -1154,23 +1163,57 @@ async function runRestoreCommand(
   await fs.mkdir(channelsDir, { recursive: true });
 
   const targetDir = path.join(channelsDir, instanceName);
+  const tempExtractRoot = path.join(channelsDir, `.restore-${instanceName}-${Date.now()}`);
   try {
     await fs.access(targetDir);
     if (!args.includes("--force")) {
       throw new Error(`Instance "${instanceName}" already exists. Add --force to overwrite.`);
     }
-    await fs.rm(targetDir, { recursive: true, force: true });
   } catch (e) {
     if (e instanceof Error && e.message.includes("already exists")) throw e;
   }
 
   const { extractArchive } = await import("../state/archive.js");
-  const result = await extractArchive(archivePath, channelsDir);
+  let result: Awaited<ReturnType<typeof extractArchive>>;
+  try {
+    result = await extractArchive(archivePath, tempExtractRoot);
+  } catch (error) {
+    await fs.rm(tempExtractRoot, { recursive: true, force: true });
+    throw error;
+  }
 
   // If the archive was created under a different instance name, rename to requested
-  const extractedDir = path.join(channelsDir, result.rootName);
+  const extractedDir = path.join(tempExtractRoot, result.rootName);
+  let stagedDir = extractedDir;
   if (result.rootName !== instanceName) {
-    await fs.rename(extractedDir, targetDir);
+    stagedDir = path.join(tempExtractRoot, instanceName);
+    await fs.rename(extractedDir, stagedDir);
+  }
+
+  let backupDir: string | null = null;
+  try {
+    await fs.access(targetDir);
+    backupDir = path.join(channelsDir, `.restore-backup-${instanceName}-${Date.now()}`);
+    await fs.rename(targetDir, backupDir);
+  } catch (error) {
+    if (!(typeof error === "object" && error !== null && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT")) {
+      throw error;
+    }
+  }
+
+  try {
+    await fs.rename(stagedDir, targetDir);
+  } catch (error) {
+    if (backupDir !== null) {
+      await fs.rename(backupDir, targetDir);
+    }
+    throw error;
+  } finally {
+    await fs.rm(tempExtractRoot, { recursive: true, force: true });
+  }
+
+  if (backupDir !== null) {
+    await fs.rm(backupDir, { recursive: true, force: true });
   }
 
   logger.log(`Restored instance "${instanceName}" from ${archivePath} (${result.fileCount} files).`);
@@ -1251,7 +1294,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   }
 
   if (normalized[0] === "instance") {
-    return runInstanceCommand(normalized, env, logger);
+    return runInstanceCommand(normalized, env, logger, options.serviceDeps ?? {});
   }
 
   if (normalized[0] === "budget") {

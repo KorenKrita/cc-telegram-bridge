@@ -134,6 +134,51 @@ describe("Bridge", () => {
     expect(adapter.sendUserMessage).not.toHaveBeenCalled();
   });
 
+  it("localizes access replies when locale is zh", async () => {
+    const accessStore: AccessStoreLike = {
+      load: vi.fn().mockResolvedValue({
+        policy: "pairing",
+        pairedUsers: [],
+        allowlist: [],
+        pendingPairs: [],
+      }),
+      issuePairingCode: vi.fn().mockResolvedValue({ code: "ABC123" }),
+    };
+    const sessionManager: SessionManagerLike = {
+      getOrCreateSession: vi.fn(),
+      bindSession: vi.fn(),
+    };
+    const adapter: CodexAdapter = {
+      sendUserMessage: vi.fn(),
+      createSession: vi.fn(),
+    };
+    const bridge = new Bridge(accessStore, sessionManager, adapter);
+
+    await expect(
+      bridge.handleAuthorizedMessage({
+        chatId: 84,
+        userId: 84,
+        chatType: "group",
+        locale: "zh",
+        text: "hello",
+        replyContext: undefined,
+        files: [],
+      }),
+    ).resolves.toEqual({ text: "此 bot 只接受私聊。" });
+
+    await expect(
+      bridge.handleAuthorizedMessage({
+        chatId: 84,
+        userId: 84,
+        chatType: "private",
+        locale: "zh",
+        text: "hello",
+        replyContext: undefined,
+        files: [],
+      }),
+    ).resolves.toEqual({ text: "使用配对码 ABC123 配对此私聊" });
+  });
+
   it("allows a paired chat in pairing mode", async () => {
     const accessStore: AccessStoreLike = {
       load: vi.fn().mockResolvedValue({
@@ -278,6 +323,52 @@ describe("Bridge", () => {
         files: [],
       }),
     ).resolves.toEqual({ text: "This bot only accepts private chats." });
+  });
+
+  it("localizes private-chat-required and pairing replies when locale is zh", async () => {
+    const accessStore: AccessStoreLike = {
+      load: vi.fn().mockResolvedValue({
+        policy: "pairing",
+        pairedUsers: [],
+        allowlist: [],
+        pendingPairs: [],
+      }),
+      issuePairingCode: vi.fn().mockResolvedValue({ code: "ABC123" }),
+    };
+    const sessionManager: SessionManagerLike = {
+      getOrCreateSession: vi.fn(),
+      bindSession: vi.fn(),
+    };
+    const adapter: CodexAdapter = {
+      sendUserMessage: vi.fn(),
+      createSession: vi.fn(),
+    };
+
+    const bridge = new Bridge(accessStore, sessionManager, adapter);
+
+    await expect(
+      bridge.handleAuthorizedMessage({
+        chatId: 84,
+        userId: 84,
+        chatType: "group",
+        text: "hello",
+        replyContext: undefined,
+        files: [],
+        locale: "zh",
+      }),
+    ).resolves.toEqual({ text: "此 bot 只接受私聊。" });
+
+    await expect(
+      bridge.handleAuthorizedMessage({
+        chatId: 84,
+        userId: 84,
+        chatType: "private",
+        text: "hello",
+        replyContext: undefined,
+        files: [],
+        locale: "zh",
+      }),
+    ).resolves.toEqual({ text: "使用配对码 ABC123 配对此私聊" });
   });
 
   it("includes quoted reply context in the prompt", async () => {

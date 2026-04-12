@@ -286,6 +286,7 @@ export async function handleNormalizedTelegramMessage(
       chatId: normalized.chatId,
       userId: normalized.userId,
       chatType: normalized.chatType,
+      locale,
     });
 
     if (accessDecision.kind === "reply" || accessDecision.kind === "deny") {
@@ -547,6 +548,7 @@ export async function handleNormalizedTelegramMessage(
       chatId: normalized.chatId,
       userId: normalized.userId,
       chatType: normalized.chatType,
+      locale,
       text: requestText,
       replyContext,
       files: requestFiles,

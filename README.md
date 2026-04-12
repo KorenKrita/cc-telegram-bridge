@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <a href="#dual-engine-codex--claude-code">Dual Engine</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#multi-bot-setup">Multi-Bot</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#agent-instructions">agent.md</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#yolo-mode">YOLO</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#budget-control">Budget</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#localization">i18n</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#backup--restore">Backup</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#quick-start">Quick Start</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#service-operations">Ops</a>
+  <a href="#dual-engine-codex--claude-code">Dual Engine</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#multi-bot-setup">Multi-Bot</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#agent-bus">Agent Bus</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#yolo-mode">YOLO</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#budget-control">Budget</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#localization">i18n</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#backup--restore">Backup</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#quick-start">Quick Start</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#service-operations">Ops</a>
 </p>
 
 > **RULE 1:** Let your Claude Code or Codex CLI set this up for you. Clone the repo, open it in your terminal, and tell your AI agent: *"read the README and configure a Telegram bot for me"*. It will handle the rest.
@@ -251,6 +251,82 @@ npm run dev -- telegram restore ./bak.cctb.gz --instance work --force  # Overwri
 ```
 
 The archive format is a pure-Node gzipped binary — no `tar` dependency, works on Windows/macOS/Linux identically.
+
+---
+
+## Agent Bus
+
+Enable bot-to-bot communication via local HTTP IPC. Bots delegate tasks to each other with `/ask`, and the bus handles routing, peer validation, and loop prevention.
+
+### Enable
+
+Add `bus` to each instance's `config.json`:
+
+```json
+{ "engine": "codex", "bus": { "peers": "*" } }
+```
+
+| Field | Description |
+|---|---|
+| `peers` | `"*"` = talk to all bus-enabled bots. `["a", "b"]` = specific bots only. Omit or `false` = isolated. |
+| `maxDepth` | Max delegation hops (default `3`). Prevents A→B→C→A loops. |
+| `port` | Local HTTP port. `0` = auto-assign (default). |
+
+Both sides must allow each other — unilateral bus config is rejected.
+
+### Usage
+
+In any bot's Telegram chat:
+
+```
+/ask reviewer Please review this function for security issues
+/ask researcher Find the latest benchmarks for SQLite vs PostgreSQL
+```
+
+The result comes back inline: `[From reviewer] ...`
+
+### Topology Patterns
+
+**Hub & Spoke** — one commander, multiple workers:
+
+```
+              ┌──────────┐
+              │  main    │
+              │ peers: * │
+              └──┬────┬──┘
+                 │    │
+         ┌───────┘    └───────┐
+         ▼                    ▼
+   ┌──────────┐        ┌──────────┐
+   │ reviewer │        │ researcher│
+   │peers:    │        │peers:     │
+   │ ["main"] │        │ ["main"]  │
+   └──────────┘        └──────────┘
+```
+
+Workers only talk to the hub. The hub dispatches and aggregates.
+
+**Pipeline** — sequential handoff:
+
+```
+┌────────┐     ┌────────┐     ┌────────┐
+│ intake │────▶│ coder  │────▶│ review │
+│peers:  │     │peers:  │     │peers:  │
+│["coder"]│    │["intake",│   │["coder"]│
+└────────┘    │"review"]│    └────────┘
+              └────────┘
+```
+
+Each bot only knows its neighbors. Tasks flow left to right.
+
+**Mesh** — full interconnect:
+
+```json
+// Every instance
+{ "bus": { "peers": "*" } }
+```
+
+All bots can talk to all bots. Simplest config, best for small teams (3-5 bots).
 
 ---
 

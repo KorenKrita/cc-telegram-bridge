@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <a href="#双引擎codex--claude-code">双引擎</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#多-bot-部署">多 Bot</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#agent-指令">agent.md</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#yolo-模式">YOLO</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#预算控制">预算</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#国际化">i18n</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#备份与恢复">备份</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#快速开始">快速开始</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#服务运维">运维</a>
+  <a href="#双引擎codex--claude-code">双引擎</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#多-bot-部署">多 Bot</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#agent-bus">Agent Bus</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#yolo-模式">YOLO</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#预算控制">预算</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#国际化">i18n</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#备份与恢复">备份</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#快速开始">快速开始</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#服务运维">运维</a>
 </p>
 
 > **RULE 1：** 让你的 Claude Code 或 Codex CLI 来帮你配置这个项目。克隆仓库，在终端里打开，然后告诉你的 AI agent：*"读一下 README，帮我配置一个 Telegram bot"*。剩下的它会搞定。
@@ -250,6 +250,82 @@ npm run dev -- telegram backup --instance work --out ./bak.cctb.gz
 npm run dev -- telegram restore ./bak.cctb.gz --instance work  # 恢复（实例不能已存在）
 npm run dev -- telegram restore ./bak.cctb.gz --instance work --force  # 覆盖已有实例
 ```
+
+---
+
+## Agent Bus
+
+通过本地 HTTP IPC 实现 bot 间通信。bot 之间可以用 `/ask` 互相委托任务，bus 负责路由、对等验证和防循环。
+
+### 开启
+
+在每个实例的 `config.json` 里加 `bus`：
+
+```json
+{ "engine": "codex", "bus": { "peers": "*" } }
+```
+
+| 字段 | 说明 |
+|---|---|
+| `peers` | `"*"` = 和所有开了 bus 的 bot 通信。`["a", "b"]` = 只和指定 bot 通信。不写或 `false` = 隔离。 |
+| `maxDepth` | 最大委托跳数（默认 `3`）。防止 A→B→C→A 循环。 |
+| `port` | 本地 HTTP 端口。`0` = 自动分配（默认）。 |
+
+双方都必须允许对方 — 单方面配置会被拒绝。
+
+### 使用
+
+在任意 bot 的 Telegram 聊天中：
+
+```
+/ask reviewer 帮我审查这个函数的安全问题
+/ask researcher 查一下 SQLite 和 PostgreSQL 的最新性能对比
+```
+
+结果内联显示：`[来自 reviewer] ...`
+
+### 拓扑模式
+
+**主副模式（Hub & Spoke）** — 一个指挥，多个执行：
+
+```
+              ┌──────────┐
+              │  main    │
+              │ peers: * │
+              └──┬────┬──┘
+                 │    │
+         ┌───────┘    └───────┐
+         ▼                    ▼
+   ┌──────────┐        ┌──────────┐
+   │ reviewer │        │ researcher│
+   │peers:    │        │peers:     │
+   │ ["main"] │        │ ["main"]  │
+   └──────────┘        └──────────┘
+```
+
+工作 bot 只和主 bot 通信。主 bot 分发任务并汇总结果。
+
+**串联模式（Pipeline）** — 按顺序传递：
+
+```
+┌────────┐     ┌────────┐     ┌────────┐
+│ intake │────▶│ coder  │────▶│ review │
+│peers:  │     │peers:  │     │peers:  │
+│["coder"]│    │["intake",│   │["coder"]│
+└────────┘    │"review"]│    └────────┘
+              └────────┘
+```
+
+每个 bot 只知道相邻的 bot。任务从左到右流动。
+
+**全互联（Mesh）** — 所有 bot 自由通信：
+
+```json
+// 每个实例
+{ "bus": { "peers": "*" } }
+```
+
+所有 bot 可以和所有 bot 通信。最简配置，适合 3-5 个 bot 的小团队。
 
 ---
 

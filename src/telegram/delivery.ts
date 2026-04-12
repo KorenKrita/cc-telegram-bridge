@@ -22,6 +22,7 @@ import { readFile } from "node:fs/promises";
 import { SessionStore } from "../state/session-store.js";
 import { SessionStateError } from "../runtime/session-manager.js";
 import { delegateToInstance } from "../bus/bus-client.js";
+import { loadBusConfig } from "../bus/bus-config.js";
 
 interface InstanceConfig {
   engine: "codex" | "claude";
@@ -116,6 +117,18 @@ function parseAskCommand(text: string): { targetInstance: string; prompt: string
     return null;
   }
   return { targetInstance: match[1]!, prompt: match[2]!.trim() };
+}
+
+function parseFanCommand(text: string): { prompt: string } | null {
+  const match = text.trim().match(/^\/fan(?:@\w+)?\s+([\s\S]+)$/i);
+  if (!match) return null;
+  return { prompt: match[1]!.trim() };
+}
+
+function parseVerifyCommand(text: string): { prompt: string } | null {
+  const match = text.trim().match(/^\/verify(?:@\w+)?\s+([\s\S]+)$/i);
+  if (!match) return null;
+  return { prompt: match[1]!.trim() };
 }
 
 function isBlockingWorkflowStatus(status: "preparing" | "processing" | "awaiting_continue" | "completed" | "failed"): boolean {
@@ -471,6 +484,143 @@ export async function handleNormalizedTelegramMessage(
           metadata: { durationMs: Date.now() - startedAt, delegatedTo: askCommand.targetInstance },
         });
       }
+      return;
+    }
+
+    const fanCommand = parseFanCommand(normalized.text);
+    if (fanCommand) {
+      const busConfig = await loadBusConfig(stateDir);
+      const targets = busConfig?.parallel ?? [];
+      if (targets.length === 0) {
+        await context.api.editMessage(normalized.chatId, placeholderMessageId,
+          locale === "zh" ? "未配置 parallel bot。在 config.json 的 bus.parallel 中添加实例名。" : "No parallel bots configured. Add instance names to bus.parallel in config.json.");
+        placeholderShowsResponse = true;
+        return;
+      }
+
+      const currentInstance = context.instanceName ?? "default";
+      await context.api.editMessage(normalized.chatId, placeholderMessageId,
+        locale === "zh" ? `正在并行查询 ${targets.length + 1} 个 bot...` : `Querying ${targets.length + 1} bots in parallel...`);
+
+      try {
+        const selfPromise = context.bridge.handleAuthorizedMessage({
+          chatId: normalized.chatId,
+          userId: normalized.userId,
+          chatType: normalized.chatType,
+          locale,
+          text: fanCommand.prompt,
+          files: [],
+        });
+        const peerPromises = targets.map((target) =>
+          delegateToInstance({ fromInstance: currentInstance, targetInstance: target, prompt: fanCommand.prompt, depth: 0, stateDir })
+            .then((r) => ({ name: target, text: r.text, error: null as string | null }))
+            .catch((e) => ({ name: target, text: "", error: e instanceof Error ? e.message : String(e) })),
+        );
+
+        const [selfResult, ...peerResults] = await Promise.all([selfPromise, ...peerPromises]);
+        const sections: string[] = [`[${currentInstance}]\n${selfResult.text}`];
+        for (const peer of peerResults) {
+          sections.push(peer.error
+            ? `[${peer.name}] Error: ${peer.error}`
+            : `[${peer.name}]\n${peer.text}`);
+        }
+
+        const fanResponse = sections.join("\n\n---\n\n");
+        const chunks = chunkTelegramMessage(fanResponse);
+        await context.api.editMessage(normalized.chatId, placeholderMessageId, chunks[0]!);
+        placeholderShowsResponse = true;
+        for (const chunk of chunks.slice(1)) {
+          await context.api.sendMessage(normalized.chatId, chunk);
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        await context.api.editMessage(normalized.chatId, placeholderMessageId,
+          locale === "zh" ? `并行执行失败：${detail}` : `Parallel execution failed: ${detail}`);
+        placeholderShowsResponse = true;
+      }
+
+      await appendAuditEventBestEffort(stateDir, {
+        type: "update.handle",
+        instanceName: context.instanceName,
+        chatId: normalized.chatId,
+        userId: normalized.userId,
+        updateId: context.updateId,
+        outcome: "success",
+        metadata: { durationMs: Date.now() - startedAt, fanTargets: targets },
+      });
+      return;
+    }
+
+    const verifyCommand = parseVerifyCommand(normalized.text);
+    if (verifyCommand) {
+      const busConfig = await loadBusConfig(stateDir);
+      const verifier = busConfig?.verifier;
+      if (!verifier) {
+        await context.api.editMessage(normalized.chatId, placeholderMessageId,
+          locale === "zh" ? "未配置验证 bot。在 config.json 的 bus.verifier 中设置实例名。" : "No verifier configured. Set bus.verifier in config.json.");
+        placeholderShowsResponse = true;
+        return;
+      }
+
+      const currentInstance = context.instanceName ?? "default";
+      await context.api.editMessage(normalized.chatId, placeholderMessageId,
+        locale === "zh" ? "正在执行..." : "Executing...");
+
+      try {
+        const result = await context.bridge.handleAuthorizedMessage({
+          chatId: normalized.chatId,
+          userId: normalized.userId,
+          chatType: normalized.chatType,
+          locale,
+          text: verifyCommand.prompt,
+          files: [],
+        });
+
+        await context.api.editMessage(normalized.chatId, placeholderMessageId,
+          locale === "zh" ? `正在让 ${verifier} 验证...` : `Sending to ${verifier} for verification...`);
+
+        const verifyResult = await delegateToInstance({
+          fromInstance: currentInstance,
+          targetInstance: verifier,
+          prompt: locale === "zh"
+            ? `请验证以下回复的正确性和质量：\n\n原始问题：${verifyCommand.prompt}\n\n回复：${result.text}`
+            : `Please verify the correctness and quality of this response:\n\nOriginal question: ${verifyCommand.prompt}\n\nResponse: ${result.text}`,
+          depth: 0,
+          stateDir,
+        });
+
+        const verifyResponse = [
+          locale === "zh" ? `[${currentInstance} 的回复]` : `[Response from ${currentInstance}]`,
+          result.text,
+          "",
+          "---",
+          "",
+          locale === "zh" ? `[${verifier} 的验证]` : `[Verification by ${verifier}]`,
+          verifyResult.text,
+        ].join("\n");
+
+        const chunks = chunkTelegramMessage(verifyResponse);
+        await context.api.editMessage(normalized.chatId, placeholderMessageId, chunks[0]!);
+        placeholderShowsResponse = true;
+        for (const chunk of chunks.slice(1)) {
+          await context.api.sendMessage(normalized.chatId, chunk);
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        await context.api.editMessage(normalized.chatId, placeholderMessageId,
+          locale === "zh" ? `验证流程失败：${detail}` : `Verification failed: ${detail}`);
+        placeholderShowsResponse = true;
+      }
+
+      await appendAuditEventBestEffort(stateDir, {
+        type: "update.handle",
+        instanceName: context.instanceName,
+        chatId: normalized.chatId,
+        userId: normalized.userId,
+        updateId: context.updateId,
+        outcome: "success",
+        metadata: { durationMs: Date.now() - startedAt, verifier },
+      });
       return;
     }
 

@@ -28,17 +28,17 @@ describe("parseBusConfig", () => {
 
   it("parses true as wildcard peers", () => {
     const result = parseBusConfig(true);
-    expect(result).toEqual({ peers: "*", maxDepth: 3, port: 0, secret: "" });
+    expect(result).toEqual({ peers: "*", maxDepth: 3, port: 0, secret: "", parallel: [], verifier: null });
   });
 
   it("parses peers wildcard", () => {
     const result = parseBusConfig({ peers: "*" });
-    expect(result).toEqual({ peers: "*", maxDepth: 3, port: 0, secret: "" });
+    expect(result).toEqual({ peers: "*", maxDepth: 3, port: 0, secret: "", parallel: [], verifier: null });
   });
 
   it("parses peers list", () => {
     const result = parseBusConfig({ peers: ["work", "reviewer"] });
-    expect(result).toEqual({ peers: ["work", "reviewer"], maxDepth: 3, port: 0, secret: "" });
+    expect(result).toEqual({ peers: ["work", "reviewer"], maxDepth: 3, port: 0, secret: "", parallel: [], verifier: null });
   });
 
   it("returns null for empty peers list", () => {
@@ -47,12 +47,20 @@ describe("parseBusConfig", () => {
 
   it("respects custom maxDepth and port", () => {
     const result = parseBusConfig({ peers: "*", maxDepth: 5, port: 9200 });
-    expect(result).toEqual({ peers: "*", maxDepth: 5, port: 9200, secret: "" });
+    expect(result).toEqual({ peers: "*", maxDepth: 5, port: 9200, secret: "", parallel: [], verifier: null });
   });
 
   it("parses secret", () => {
     const result = parseBusConfig({ peers: "*", secret: "my-token" });
-    expect(result).toEqual({ peers: "*", maxDepth: 3, port: 0, secret: "my-token" });
+    expect(result).toEqual({ peers: "*", maxDepth: 3, port: 0, secret: "my-token", parallel: [], verifier: null });
+  });
+
+  it("parses parallel and verifier", () => {
+    const result = parseBusConfig({ peers: "*", parallel: ["sec-bot", "perf-bot"], verifier: "reviewer" });
+    expect(result).toEqual({
+      peers: "*", maxDepth: 3, port: 0, secret: "",
+      parallel: ["sec-bot", "perf-bot"], verifier: "reviewer",
+    });
   });
 
   it("returns null for peers: false", () => {
@@ -62,19 +70,19 @@ describe("parseBusConfig", () => {
 
 describe("isPeerAllowed", () => {
   it("allows all peers with wildcard", () => {
-    const config: BusConfig = { peers: "*", maxDepth: 3, port: 0, secret: "" };
+    const config: BusConfig = { peers: "*", maxDepth: 3, port: 0, secret: "", parallel: [], verifier: null };
     expect(isPeerAllowed(config, "anything")).toBe(true);
   });
 
   it("allows listed peers", () => {
-    const config: BusConfig = { peers: ["work", "reviewer"], maxDepth: 3, port: 0, secret: "" };
+    const config: BusConfig = { peers: ["work", "reviewer"], maxDepth: 3, port: 0, secret: "", parallel: [], verifier: null };
     expect(isPeerAllowed(config, "work")).toBe(true);
     expect(isPeerAllowed(config, "reviewer")).toBe(true);
     expect(isPeerAllowed(config, "unknown")).toBe(false);
   });
 
   it("denies all when peers is false", () => {
-    const config: BusConfig = { peers: false, maxDepth: 3, port: 0, secret: "" };
+    const config: BusConfig = { peers: false, maxDepth: 3, port: 0, secret: "", parallel: [], verifier: null };
     expect(isPeerAllowed(config, "work")).toBe(false);
   });
 });

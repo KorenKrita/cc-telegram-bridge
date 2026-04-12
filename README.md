@@ -271,6 +271,9 @@ Add `bus` to each instance's `config.json`:
 | `peers` | `"*"` = talk to all bus-enabled bots. `["a", "b"]` = specific bots only. Omit or `false` = isolated. |
 | `maxDepth` | Max delegation hops (default `3`). Prevents A→B→C→A loops. |
 | `port` | Local HTTP port. `0` = auto-assign (default). |
+| `secret` | Shared secret for Bearer token authentication (optional). |
+| `parallel` | List of instances for `/fan` parallel queries (e.g. `["sec-bot", "perf-bot"]`). |
+| `verifier` | Instance name for `/verify` auto-verification (e.g. `"reviewer"`). |
 
 Both sides must allow each other — unilateral bus config is rejected.
 
@@ -280,10 +283,13 @@ In any bot's Telegram chat:
 
 ```
 /ask reviewer Please review this function for security issues
-/ask researcher Find the latest benchmarks for SQLite vs PostgreSQL
+/fan Analyze this code for bugs, security issues, and performance
+/verify Write a function to sort an array
 ```
 
-The result comes back inline: `[From reviewer] ...`
+- `/ask <instance> <prompt>` — delegate to a specific bot, result inline
+- `/fan <prompt>` — query current bot + all `parallel` bots simultaneously, combined results
+- `/verify <prompt>` — execute on current bot, then auto-send to `verifier` for review
 
 ### Topology Patterns
 
@@ -318,6 +324,46 @@ Workers only talk to the hub. The hub dispatches and aggregates.
 ```
 
 Each bot only knows its neighbors. Tasks flow left to right.
+
+**Parallel** — fan-out to multiple specialists:
+
+```
+                    /fan "analyze this code"
+                           │
+            ┌──────────────┼──────────────┐
+            ▼              ▼              ▼
+      ┌──────────┐  ┌──────────┐  ┌──────────┐
+      │ sec-bot  │  │ perf-bot │  │ style-bot│
+      └──────────┘  └──────────┘  └──────────┘
+            │              │              │
+            └──────────────┼──────────────┘
+                           ▼
+                   Combined result
+```
+
+```json
+{ "bus": { "peers": "*", "parallel": ["sec-bot", "perf-bot", "style-bot"] } }
+```
+
+**Verification** — execute then auto-review:
+
+```
+/verify "write a sort function"
+         │
+         ▼
+   ┌──────────┐    result    ┌──────────┐
+   │  coder   │ ───────────▶ │ reviewer │
+   └──────────┘              └──────────┘
+                                  │
+                             verification
+                                  │
+                                  ▼
+                        Both shown to user
+```
+
+```json
+{ "bus": { "peers": "*", "verifier": "reviewer" } }
+```
 
 **Mesh** — full interconnect:
 

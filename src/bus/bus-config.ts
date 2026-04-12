@@ -6,6 +6,8 @@ export interface BusConfig {
   maxDepth: number;
   port: number;
   secret: string;
+  parallel: string[];
+  verifier: string | null;
 }
 
 const DEFAULT_MAX_DEPTH = 3;
@@ -16,7 +18,7 @@ export function parseBusConfig(raw: unknown): BusConfig | null {
   }
 
   if (raw === true) {
-    return { peers: "*", maxDepth: DEFAULT_MAX_DEPTH, port: 0, secret: "" };
+    return { peers: "*", maxDepth: DEFAULT_MAX_DEPTH, port: 0, secret: "", parallel: [], verifier: null };
   }
 
   if (typeof raw !== "object") {
@@ -49,7 +51,13 @@ export function parseBusConfig(raw: unknown): BusConfig | null {
 
   const secret = typeof obj.secret === "string" ? obj.secret : "";
 
-  return { peers, maxDepth, port, secret };
+  const parallel = Array.isArray(obj.parallel)
+    ? obj.parallel.filter((v): v is string => typeof v === "string")
+    : [];
+
+  const verifier = typeof obj.verifier === "string" && obj.verifier.trim() ? obj.verifier.trim() : null;
+
+  return { peers, maxDepth, port, secret, parallel, verifier };
 }
 
 export async function loadBusConfig(stateDir: string): Promise<BusConfig | null> {

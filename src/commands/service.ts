@@ -394,6 +394,11 @@ export async function startServiceInstance(
   }
 
   await mkdir(paths.stateDir, { recursive: true });
+
+  // Rotate logs before truncating on start
+  const { rotateInstanceLogs } = await import("../state/log-rotation.js");
+  await rotateInstanceLogs(paths.stateDir);
+
   await writeFile(paths.stdoutPath, "", "utf8");
   await writeFile(paths.stderrPath, "", "utf8");
 

@@ -920,8 +920,279 @@ Commands:
   engine [codex|claude] [--instance <name>]   Switch AI engine per instance
   usage [--instance <name>]                   Show token usage and cost
   verbosity [0|1|2] [--instance <name>]       Set progress output level
+  budget [set <usd>|show] [--instance <name>] Manage cost budget and block-on-exceed
+  locale [en|zh] [--instance <name>]          Set user-facing message language
+  instance <list|rename|delete> [...]         Manage instances (list, rename, delete)
+  logs rotate [--instance <name>]             Rotate log files now (auto on service start)
+  backup [--instance <name>] [--out <path>]   Back up instance state to a zip archive
+  restore <zip-path> [--instance <name>]      Restore instance state from a backup zip
   dashboard                                   Open a visual status dashboard in the browser
   help                                        Show this help message`;
+
+function resolveStateDirForInstance(env: InstanceTokenEnv, instanceName: string): string {
+  return resolveInstanceStateDir({
+    HOME: env.HOME,
+    USERPROFILE: env.USERPROFILE,
+    CODEX_TELEGRAM_STATE_DIR: env.CODEX_TELEGRAM_STATE_DIR,
+    CODEX_TELEGRAM_INSTANCE: instanceName,
+  });
+}
+
+function resolveChannelsDirFromEnv(env: InstanceTokenEnv): string {
+  const home = env.HOME ?? env.USERPROFILE;
+  if (!home) throw new Error("HOME or USERPROFILE is required");
+  return path.join(home, ".codex", "channels", "telegram");
+}
+
+async function runLogsCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+): Promise<boolean> {
+  const sub = argv[1];
+  if (sub !== "rotate") {
+    throw new Error("Usage: telegram logs rotate [--instance <name>]");
+  }
+  const { instanceName } = extractInstanceOption(argv.slice(2));
+  const stateDir = resolveStateDirForInstance(env, instanceName);
+  const { rotateInstanceLogs } = await import("../state/log-rotation.js");
+  const rotated = await rotateInstanceLogs(stateDir);
+  if (rotated.length === 0) {
+    logger.log(`Instance "${instanceName}": no log files needed rotation.`);
+  } else {
+    logger.log(`Instance "${instanceName}": rotated ${rotated.length} file(s):`);
+    for (const file of rotated) logger.log(`  - ${file}`);
+  }
+  return true;
+}
+
+async function runInstanceCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+): Promise<boolean> {
+  const sub = argv[1];
+  const fs = await import("node:fs/promises");
+  const channelsDir = resolveChannelsDirFromEnv(env);
+
+  if (sub === "list" || sub === undefined) {
+    let entries: string[];
+    try {
+      const dirents = await fs.readdir(channelsDir, { withFileTypes: true });
+      entries = dirents.filter((e) => e.isDirectory()).map((e) => e.name).sort();
+    } catch {
+      entries = [];
+    }
+    if (entries.length === 0) {
+      logger.log("No instances found.");
+      return true;
+    }
+    logger.log(`Instances (${entries.length}):`);
+    for (const name of entries) {
+      const stateDir = path.join(channelsDir, name);
+      let engine = "codex";
+      let running = false;
+      try {
+        const cfg = JSON.parse(await fs.readFile(path.join(stateDir, "config.json"), "utf8")) as { engine?: string };
+        engine = cfg.engine ?? "codex";
+      } catch {}
+      try {
+        const lk = JSON.parse(await fs.readFile(path.join(stateDir, "instance.lock.json"), "utf8")) as { pid?: number };
+        if (lk.pid) {
+          try { process.kill(lk.pid, 0); running = true; } catch { running = false; }
+        }
+      } catch {}
+      logger.log(`  - ${name} [${engine}] ${running ? "running" : "stopped"}`);
+    }
+    return true;
+  }
+
+  if (sub === "rename") {
+    if (argv.length < 4) {
+      throw new Error("Usage: telegram instance rename <old> <new>");
+    }
+    const oldName = normalizeInstanceName(argv[2]);
+    const newName = normalizeInstanceName(argv[3]);
+    const oldDir = path.join(channelsDir, oldName);
+    const newDir = path.join(channelsDir, newName);
+    try { await fs.access(newDir); throw new Error(`Instance "${newName}" already exists.`); } catch (e) {
+      if (e instanceof Error && e.message.includes("already exists")) throw e;
+    }
+    await fs.rename(oldDir, newDir);
+    logger.log(`Renamed "${oldName}" → "${newName}". Remember to stop the service before renaming a live instance.`);
+    return true;
+  }
+
+  if (sub === "delete") {
+    if (argv.length < 3) {
+      throw new Error("Usage: telegram instance delete <name> [--yes]");
+    }
+    const name = normalizeInstanceName(argv[2]);
+    const confirmed = argv.includes("--yes");
+    if (!confirmed) {
+      throw new Error(`Add --yes to confirm deletion of instance "${name}". This cannot be undone.`);
+    }
+    const dir = path.join(channelsDir, name);
+    await fs.rm(dir, { recursive: true, force: true });
+    logger.log(`Deleted instance "${name}".`);
+    return true;
+  }
+
+  throw new Error("Usage: telegram instance <list|rename|delete> ...");
+}
+
+async function runBudgetCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+): Promise<boolean> {
+  const { instanceName, args } = extractInstanceOption(argv.slice(1));
+  const configPath = resolveConfigJsonPath(env, instanceName);
+  const config = await readInstanceConfig(configPath);
+
+  if (args.length === 0 || args[0] === "show") {
+    const budget = typeof config.budgetUsd === "number" ? config.budgetUsd : null;
+    const { UsageStore } = await import("../state/usage-store.js");
+    const stateDir = resolveStateDirForInstance(env, instanceName);
+    const usage = await new UsageStore(stateDir).load();
+    const used = usage.totalCostUsd;
+    if (budget === null) {
+      logger.log(`Instance "${instanceName}": no budget set. Current spend: $${used.toFixed(4)}`);
+    } else {
+      const pct = budget > 0 ? Math.round((used / budget) * 100) : 0;
+      const remaining = Math.max(0, budget - used);
+      logger.log(`Instance "${instanceName}": $${used.toFixed(4)} / $${budget.toFixed(2)} (${pct}%). Remaining: $${remaining.toFixed(4)}`);
+    }
+    return true;
+  }
+
+  if (args[0] === "set") {
+    const amount = Number(args[1]);
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new Error("Usage: telegram budget set <usd>");
+    }
+    config.budgetUsd = amount;
+    await writeInstanceConfig(configPath, config);
+    logger.log(`Instance "${instanceName}": budget set to $${amount.toFixed(2)}. Bot will block new requests when the budget is exhausted.`);
+    return true;
+  }
+
+  if (args[0] === "clear") {
+    delete config.budgetUsd;
+    await writeInstanceConfig(configPath, config);
+    logger.log(`Instance "${instanceName}": budget cleared.`);
+    return true;
+  }
+
+  throw new Error("Usage: telegram budget [set <usd>|show|clear] [--instance <name>]");
+}
+
+async function runLocaleCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+): Promise<boolean> {
+  const { instanceName, args } = extractInstanceOption(argv.slice(1));
+  const configPath = resolveConfigJsonPath(env, instanceName);
+  const config = await readInstanceConfig(configPath);
+
+  if (args.length === 0) {
+    const locale = config.locale ?? "en";
+    logger.log(`Instance "${instanceName}": locale = ${locale}`);
+    return true;
+  }
+
+  const locale = args[0];
+  if (locale !== "en" && locale !== "zh") {
+    throw new Error("Usage: telegram locale [en|zh] [--instance <name>]");
+  }
+  config.locale = locale;
+  await writeInstanceConfig(configPath, config);
+  logger.log(`Instance "${instanceName}": locale set to "${locale}".`);
+  return true;
+}
+
+async function runBackupCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+): Promise<boolean> {
+  const { instanceName, args } = extractInstanceOption(argv.slice(1));
+  const outIdx = args.indexOf("--out");
+  const outPath = outIdx !== -1 && args[outIdx + 1]
+    ? args[outIdx + 1]
+    : path.join(process.cwd(), `${instanceName}-backup-${Date.now()}.tar.gz`);
+
+  const stateDir = resolveStateDirForInstance(env, instanceName);
+  const fs = await import("node:fs/promises");
+  try {
+    await fs.access(stateDir);
+  } catch {
+    throw new Error(`Instance "${instanceName}" state directory not found.`);
+  }
+
+  const { spawn } = await import("node:child_process");
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("tar", ["-czf", outPath, "-C", path.dirname(stateDir), path.basename(stateDir)], {
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+    });
+    let stderr = "";
+    child.stderr?.on("data", (c) => { stderr += c.toString(); });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`tar failed: ${stderr.trim() || `exit ${code}`}`));
+    });
+  });
+
+  logger.log(`Backed up instance "${instanceName}" to ${outPath}`);
+  return true;
+}
+
+async function runRestoreCommand(
+  argv: string[],
+  env: InstanceTokenEnv,
+  logger: CliLogger,
+): Promise<boolean> {
+  const { instanceName, args } = extractInstanceOption(argv.slice(1));
+  if (args.length < 1) {
+    throw new Error("Usage: telegram restore <backup.tar.gz> [--instance <name>]");
+  }
+  const zipPath = args[0];
+  const channelsDir = resolveChannelsDirFromEnv(env);
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(channelsDir, { recursive: true });
+
+  const targetDir = path.join(channelsDir, instanceName);
+  try {
+    await fs.access(targetDir);
+    if (!args.includes("--force")) {
+      throw new Error(`Instance "${instanceName}" already exists. Add --force to overwrite.`);
+    }
+    await fs.rm(targetDir, { recursive: true, force: true });
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("already exists")) throw e;
+  }
+
+  const { spawn } = await import("node:child_process");
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("tar", ["-xzf", zipPath, "-C", channelsDir], {
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+    });
+    let stderr = "";
+    child.stderr?.on("data", (c) => { stderr += c.toString(); });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`tar failed: ${stderr.trim() || `exit ${code}`}`));
+    });
+  });
+
+  logger.log(`Restored instance "${instanceName}" from ${zipPath}`);
+  return true;
+}
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<boolean> {
   const normalized = normalizeCommandArgs(argv);
@@ -990,6 +1261,30 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     const outPath = await generateDashboard(env);
     logger.log(`Dashboard generated: ${outPath}`);
     return true;
+  }
+
+  if (normalized[0] === "logs") {
+    return runLogsCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "instance") {
+    return runInstanceCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "budget") {
+    return runBudgetCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "locale") {
+    return runLocaleCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "backup") {
+    return runBackupCommand(normalized, env, logger);
+  }
+
+  if (normalized[0] === "restore") {
+    return runRestoreCommand(normalized, env, logger);
   }
 
   return false;

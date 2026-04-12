@@ -493,6 +493,36 @@ export async function handleNormalizedTelegramMessage(
         .catch(() => {});
     };
 
+    // Budget enforcement: if config.budgetUsd is set and usage.totalCostUsd >= budget, block the request
+    try {
+      const cfgRaw = await readFile(path.join(stateDir, "config.json"), "utf8");
+      const cfg = JSON.parse(cfgRaw) as { budgetUsd?: number };
+      if (typeof cfg.budgetUsd === "number" && cfg.budgetUsd > 0) {
+        const usageStore = new UsageStore(stateDir);
+        const usage = await usageStore.load();
+        if (usage.totalCostUsd >= cfg.budgetUsd) {
+          await context.api.editMessage(
+            normalized.chatId,
+            placeholderMessageId,
+            `Budget exhausted: $${usage.totalCostUsd.toFixed(4)} used of $${cfg.budgetUsd.toFixed(2)}. Raise the budget with \`telegram budget set <usd>\` or clear it with \`telegram budget clear\`.`,
+          );
+          placeholderShowsResponse = true;
+          await appendAuditEventBestEffort(stateDir, {
+            type: "update.reply",
+            instanceName: context.instanceName,
+            chatId: normalized.chatId,
+            userId: normalized.userId,
+            updateId: context.updateId,
+            outcome: "reply",
+            detail: "budget exhausted",
+          });
+          return;
+        }
+      }
+    } catch {
+      // Config read errors should not block the request
+    }
+
     const replyContext =
       workflowResult?.kind === "direct" &&
       (workflowResult.suppressReplyContext || workflowResult.text.includes("[Archive Analysis Context]"))

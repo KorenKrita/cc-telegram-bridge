@@ -612,7 +612,6 @@ export async function handleNormalizedTelegramMessage(
     const btwCmd = parseBtwCommand(normalized.text);
     if (btwCmd) {
       // Keep typing running — engine execution follows
-      await context.api.sendMessage(normalized.chatId, renderExecutionMessage(locale));
       try {
         const btwChatId = -(2_000_000_000 + Math.floor(Math.random() * 1_000_000_000));
         const result = await context.bridge.handleAuthorizedMessage({
@@ -635,6 +634,7 @@ export async function handleNormalizedTelegramMessage(
         await context.api.sendMessage(normalized.chatId, msg);
         responded = true;
       }
+      stopTyping();
       await appendAuditEventBestEffort(path.dirname(context.inboxDir), {
         type: "update.handle",
         instanceName: context.instanceName,
@@ -649,6 +649,7 @@ export async function handleNormalizedTelegramMessage(
 
     const askCommand = parseAskCommand(normalized.text);
     if (askCommand) {
+      stopTyping();
       const currentInstance = context.instanceName ?? "default";
       if (askCommand.targetInstance === currentInstance) {
         await context.api.sendMessage(normalized.chatId,
@@ -717,6 +718,7 @@ export async function handleNormalizedTelegramMessage(
 
     const fanCommand = parseFanCommand(normalized.text);
     if (fanCommand) {
+      stopTyping();
       const busConfig = await loadBusConfig(stateDir);
       const targets = busConfig?.parallel ?? [];
       if (targets.length === 0) {
@@ -786,6 +788,7 @@ export async function handleNormalizedTelegramMessage(
 
     const verifyCommand = parseVerifyCommand(normalized.text);
     if (verifyCommand) {
+      stopTyping();
       const busConfig = await loadBusConfig(stateDir);
       const verifier = busConfig?.verifier;
       if (!verifier) {

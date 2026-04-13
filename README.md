@@ -609,6 +609,9 @@ All commands accept `--instance <name>` to target a specific bot.
 Telegram users can also use:
 
 - `/status`
+- `/effort [low|medium|high|max|off]` — set reasoning effort level
+- `/model [name|off]` — switch model
+- `/btw <question>` — ask a side question without affecting the current session
 - `/continue`
 - `/compact` (Claude only — compresses context; Codex falls back to reset)
 - `/reset`

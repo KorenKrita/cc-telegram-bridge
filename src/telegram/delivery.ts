@@ -96,16 +96,13 @@ async function updateWorkflowBestEffort(
 
 import {
   chunkTelegramMessage,
-  renderAttachmentDownloadMessage,
   renderCategorizedErrorMessage,
   renderErrorMessage,
-  renderExecutionMessage,
   renderTelegramHelpMessage,
   renderTelegramStatusMessage,
   renderUnauthorizedMessage,
   renderSessionStateErrorMessage,
   renderSessionResetMessage,
-  renderWorkingMessage,
 } from "./message-renderer.js";
 import { TelegramApi } from "./api.js";
 import type { NormalizedTelegramAttachment, NormalizedTelegramMessage } from "./update-normalizer.js";

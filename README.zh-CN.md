@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="./assets/github-banner.svg" alt="CC Telegram Bridge" width="100%" />
+  <img src="./assets/github-banner.png" alt="CC Telegram Bridge" width="100%" />
 </p>
 
 <p align="center">

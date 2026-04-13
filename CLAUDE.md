@@ -51,6 +51,25 @@ When choosing the next task without asking:
 3. Improve operator controls and observability
 4. Improve GitHub presentation and documentation
 
+## File Delivery: Claude vs Codex Engine Differences
+
+The two engines reference files differently in their output. The delivery layer (`src/telegram/delivery.ts`) must handle **all** formats:
+
+| Engine | Format | Example |
+|--------|--------|---------|
+| Claude | `[send-file:/path]` tag | `[send-file:/Users/me/img.png]` |
+| Codex | Markdown image `![alt](/path)` | `![cover](/Users/me/img.png)` |
+| Codex | Markdown link `[name](/path.ext)` | `[img.png](/Users/me/img.png)` |
+| Both | Inline text file block | `` ```file:report.txt\ncontent\n``` `` |
+
+**When modifying file delivery logic:**
+
+1. Always test with BOTH engines — Claude uses explicit bridge tags, Codex uses standard Markdown syntax.
+2. File path patterns must match both Unix (`/Users/...`) and Windows (`C:\Users\...`) absolute paths.
+3. The `sendFileOrPhoto` helper auto-detects image extensions and uses `sendPhoto` (Telegram compresses) with `sendDocument` fallback.
+4. Multiple images are sent as a Telegram album via `sendMediaGroup`.
+5. Never break the `deliverTelegramResponse` function without re-running the regex test cases (see commit `7dad7a4`).
+
 ## Repo Notes
 
 - Windows-first project

@@ -371,7 +371,7 @@ async function deliverTelegramResponse(
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(text)) !== null) {
       const p = match[1]!.trim();
-      if (p.startsWith("/") && !filePaths.includes(p)) {
+      if ((p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p)) && !filePaths.includes(p)) {
         filePaths.push(p);
       }
     }

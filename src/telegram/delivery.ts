@@ -354,8 +354,8 @@ async function deliverTelegramResponse(
   // 3. [name](/absolute/path.ext)  — Markdown link to local file
   const filePatterns = [
     /\[send-file:([^\]]+)\]/g,
-    /!\[[^\]]*\]\((\/?[A-Za-z]:?\/[^)]+)\)/g,
-    /(?<!!)\[[^\]]*\]\((\/?[A-Za-z]:?\/[^)]+\.(?:png|jpg|jpeg|gif|webp|bmp|pdf|zip|tar|gz|svg))\)/gi,
+    /!\[[^\]]*\]\(((?:\/|[A-Za-z]:[\\/])[^)]+)\)/g,
+    /(?<!!)\[[^\]]*\]\(((?:\/|[A-Za-z]:[\\/])[^)]+\.(?:png|jpg|jpeg|gif|webp|bmp|pdf|zip|tar|gz|svg))\)/gi,
   ];
   const filePaths: string[] = [];
   let cleanedText = text;

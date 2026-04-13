@@ -53,6 +53,8 @@ function renderTelegramBridgeCapabilities(): string {
     "",
     "The bridge will automatically extract the block and deliver it as a Telegram document attachment.",
     "Use this for small text or code files. For large files, save them to the workspace instead.",
+    "",
+    "IMPORTANT: Telegram is a plain-text chat environment. Do NOT use interactive UI elements such as HTML forms, checkboxes, radio buttons, dropdowns, accordions, tabs, or embedded widgets — they will not render. For multiple-choice questions, use numbered plain-text lists and ask the user to reply with a number or letter. For structured data, use simple text tables or bullet lists. Only basic Markdown (bold, italic, code, links) is supported.",
   ].join("\n");
 }
 

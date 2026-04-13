@@ -64,6 +64,7 @@ type ClaudeWorker = {
   pendingTurn: PendingTurn | null;
   instructions: string | null;
   approvalMode: ApprovalMode;
+  engineOptionsKey: string;
 };
 
 const MAX_INSTRUCTIONS_CHARS = 16_000;
@@ -235,9 +236,10 @@ export class ClaudeStreamAdapter implements CodexAdapter {
 
   private getOrCreateWorker(sessionId: string, agentInstructions: string | null, bridgeInstructions: string | null, approvalMode: ApprovalMode, engineOptions?: { effort?: string; model?: string }): ClaudeWorker {
     const combinedKey = combineInstructions(agentInstructions, bridgeInstructions);
+    const optionsKey = `${engineOptions?.effort ?? ""}:${engineOptions?.model ?? ""}`;
     const existing = this.workers.get(sessionId);
     if (existing) {
-      if (existing.instructions === combinedKey && existing.approvalMode === approvalMode) {
+      if (existing.instructions === combinedKey && existing.approvalMode === approvalMode && existing.engineOptionsKey === optionsKey) {
         return existing;
       }
 
@@ -292,6 +294,7 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       pendingTurn: null,
       instructions: combinedKey,
       approvalMode,
+      engineOptionsKey: optionsKey,
     };
 
     child.stdout?.on("data", (chunk) => {

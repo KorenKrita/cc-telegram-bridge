@@ -564,6 +564,15 @@ export async function handleNormalizedTelegramMessage(
         await context.api.editMessage(normalized.chatId, placeholderMessageId, msg);
       }
       placeholderShowsResponse = true;
+      await appendAuditEventBestEffort(stateDir, {
+        type: "update.handle",
+        instanceName: context.instanceName,
+        chatId: normalized.chatId,
+        userId: normalized.userId,
+        updateId: context.updateId,
+        outcome: "success",
+        metadata: { durationMs: Date.now() - startedAt, command: "effort", value: effortCmd.level || "query" },
+      });
       return;
     }
 
@@ -583,6 +592,15 @@ export async function handleNormalizedTelegramMessage(
         await context.api.editMessage(normalized.chatId, placeholderMessageId, msg);
       }
       placeholderShowsResponse = true;
+      await appendAuditEventBestEffort(stateDir, {
+        type: "update.handle",
+        instanceName: context.instanceName,
+        chatId: normalized.chatId,
+        userId: normalized.userId,
+        updateId: context.updateId,
+        outcome: "success",
+        metadata: { durationMs: Date.now() - startedAt, command: "model", value: modelCmd.model || "query" },
+      });
       return;
     }
 
@@ -590,7 +608,7 @@ export async function handleNormalizedTelegramMessage(
     if (btwCmd) {
       await context.api.editMessage(normalized.chatId, placeholderMessageId, renderExecutionMessage(locale));
       try {
-        const btwChatId = -(Date.now() % 1_000_000_000);
+        const btwChatId = -(2_000_000_000 + Math.floor(Math.random() * 1_000_000_000));
         const result = await context.bridge.handleAuthorizedMessage({
           chatId: btwChatId,
           userId: normalized.userId,

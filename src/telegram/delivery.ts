@@ -316,6 +316,14 @@ async function downloadAttachments(
   return downloadedFiles;
 }
 
+async function sendMessageWithMarkdown(api: TelegramApi, chatId: number, text: string): Promise<void> {
+  try {
+    await api.sendMessage(chatId, text, { parseMode: "Markdown" });
+  } catch {
+    await api.sendMessage(chatId, text);
+  }
+}
+
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]);
 
 function isImageFile(filename: string): boolean {
@@ -379,11 +387,14 @@ async function deliverTelegramResponse(
   if (cleanedText) {
     const chunks = chunkTelegramMessage(cleanedText);
     for (const chunk of chunks) {
-      await api.sendMessage(chatId, chunk);
+      await sendMessageWithMarkdown(api, chatId, chunk);
     }
   }
 
-  // Send referenced files from disk
+  // Collect referenced files from disk
+  const imageFiles: Array<{ filename: string; contents: Uint8Array }> = [];
+  const otherFiles: Array<{ filename: string; contents: Uint8Array | string }> = [];
+
   for (const filePath of filePaths) {
     try {
       const { stat } = await import("node:fs/promises");
@@ -393,10 +404,33 @@ async function deliverTelegramResponse(
       }
       const contents = await readFile(filePath);
       const fileName = path.basename(filePath);
-      await sendFileOrPhoto(api, chatId, fileName, contents);
+      if (isImageFile(fileName)) {
+        imageFiles.push({ filename: fileName, contents });
+      } else {
+        otherFiles.push({ filename: fileName, contents });
+      }
     } catch {
       // File not found or unreadable — skip silently
     }
+  }
+
+  // Send multiple images as album, single image as photo
+  if (imageFiles.length > 1) {
+    try {
+      await api.sendMediaGroup(chatId, imageFiles);
+    } catch {
+      // Fallback: send one by one
+      for (const img of imageFiles) {
+        await sendFileOrPhoto(api, chatId, img.filename, img.contents);
+      }
+    }
+  } else if (imageFiles.length === 1) {
+    await sendFileOrPhoto(api, chatId, imageFiles[0]!.filename, imageFiles[0]!.contents);
+  }
+
+  // Send non-image files
+  for (const file of otherFiles) {
+    await sendFileOrPhoto(api, chatId, file.filename, file.contents);
   }
 }
 

@@ -93,6 +93,7 @@ function isTelegramBotIdentity(value: unknown): value is TelegramBotIdentity {
 
 interface TelegramMessageOptions {
   inlineKeyboard?: InlineKeyboardButton[][];
+  parseMode?: "MarkdownV2" | "HTML" | "Markdown";
 }
 
 function isTelegramUpdateArray(value: unknown): value is unknown[] {
@@ -178,22 +179,24 @@ export class TelegramApi {
   }
 
   async sendMessage(chatId: number, text: string, options?: TelegramMessageOptions): Promise<TelegramMessage> {
-    return this.postJson("sendMessage", {
+    const body: Record<string, unknown> = {
       chat_id: chatId,
       text,
-      ...(options?.inlineKeyboard
-        ? {
-            reply_markup: {
-              inline_keyboard: options.inlineKeyboard.map((row) =>
-                row.map((button) => ({
-                  text: button.text,
-                  callback_data: button.callbackData,
-                })),
-              ),
-            },
-          }
-        : {}),
-    }, isTelegramMessage);
+    };
+    if (options?.parseMode) {
+      body.parse_mode = options.parseMode;
+    }
+    if (options?.inlineKeyboard) {
+      body.reply_markup = {
+        inline_keyboard: options.inlineKeyboard.map((row) =>
+          row.map((button) => ({
+            text: button.text,
+            callback_data: button.callbackData,
+          })),
+        ),
+      };
+    }
+    return this.postJson("sendMessage", body, isTelegramMessage);
   }
 
   async sendDocument(chatId: number, filename: string, contents: string | Uint8Array): Promise<TelegramMessage> {
@@ -344,6 +347,44 @@ export class TelegramApi {
 
   async getMe(): Promise<TelegramBotIdentity> {
     return this.postJson("getMe", {}, isTelegramBotIdentity);
+  }
+
+  async sendMediaGroup(chatId: number, photos: Array<{ filename: string; contents: Uint8Array; caption?: string }>): Promise<void> {
+    const boundary = `----cc-telegram-bridge-${Math.random().toString(16).slice(2)}`;
+    const parts: Buffer[] = [];
+
+    const media = photos.map((photo, index) => ({
+      type: "photo" as const,
+      media: `attach://photo${index}`,
+      ...(photo.caption ? { caption: photo.caption } : {}),
+    }));
+
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n` +
+      `--${boundary}\r\nContent-Disposition: form-data; name="media"\r\n\r\n${JSON.stringify(media)}\r\n`,
+      "utf8",
+    ));
+
+    for (let i = 0; i < photos.length; i++) {
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="photo${i}"; filename="${photos[i]!.filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+        "utf8",
+      ));
+      parts.push(Buffer.from(photos[i]!.contents));
+      parts.push(Buffer.from("\r\n", "utf8"));
+    }
+
+    parts.push(Buffer.from(`--${boundary}--\r\n`, "utf8"));
+
+    const response = await fetch(this.buildUrl("sendMediaGroup"), {
+      method: "POST",
+      headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
+      body: new Uint8Array(Buffer.concat(parts)),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Telegram API request failed for sendMediaGroup: ${response.status} ${response.statusText}`);
+    }
   }
 
   async sendChatAction(chatId: number, action: "typing" = "typing"): Promise<void> {

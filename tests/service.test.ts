@@ -320,6 +320,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
     };
     const bridge = {
       checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
@@ -373,6 +374,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
     };
     const bridge = {
       checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
@@ -444,6 +446,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
     };
     const bridge = {
       checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
@@ -531,6 +534,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
     };
     const bridge = {
       checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
@@ -586,6 +590,7 @@ describe("polling helpers", () => {
           sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
           editMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
         } as never,
         bridge: bridge as never,
         inboxDir: path.join(os.tmpdir(), "ignored"),
@@ -841,6 +846,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
     };
     let activeCalls = 0;
     let maxConcurrentCalls = 0;
@@ -915,6 +921,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi
         .fn()
         .mockResolvedValueOnce({ file_path: "docs/report.pdf" })
@@ -983,6 +990,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "uploads/repo.zip" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await writeFile(destinationPath, zipBuffer);
@@ -1051,6 +1059,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "uploads/repo.zip" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await writeFile(destinationPath, zipBuffer);
@@ -1100,6 +1109,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "uploads/bad.zip" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await writeFile(destinationPath, "not a zip archive", "utf8");
@@ -1173,6 +1183,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "uploads/evil.zip" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await writeFile(destinationPath, zipBuffer);
@@ -1230,6 +1241,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "uploads/repo.zip" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await writeFile(destinationPath, zipBuffer);
@@ -1338,6 +1350,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -1443,6 +1456,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "uploads/note.txt" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await writeFile(destinationPath, "hello", "utf8");
@@ -1516,6 +1530,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -1598,6 +1613,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       sendDocument: vi.fn().mockRejectedValue(new Error("sendDocument failed after response")),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
@@ -1637,7 +1653,7 @@ describe("polling helpers", () => {
         records: Array<{ status: string }>;
       };
       expect(workflowState.records[0]?.status).toBe("failed");
-      expect(api.sendMessage).toHaveBeenCalledWith(123, "continuation complete");
+      expect(api.sendMessage).toHaveBeenCalledWith(123, "continuation complete", expect.anything());
       expect(api.sendMessage).toHaveBeenLastCalledWith(
         123,
         "Error: Telegram delivery is temporarily unavailable. Retry the request or try again later.",
@@ -1677,6 +1693,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -1773,6 +1790,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
@@ -1867,6 +1885,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       answerCallbackQuery: vi.fn().mockRejectedValue(new Error("ack failed")),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
@@ -1952,6 +1971,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -2039,6 +2059,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -2106,6 +2127,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
@@ -2170,6 +2192,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
@@ -2238,6 +2261,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -2281,6 +2305,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
@@ -2373,6 +2398,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "documents/repo.zip" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await mkdir(path.dirname(destinationPath), { recursive: true });
@@ -2425,6 +2451,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "documents/repo.zip" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await mkdir(path.dirname(destinationPath), { recursive: true });
@@ -2515,6 +2542,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -2533,7 +2561,7 @@ describe("polling helpers", () => {
         conflict: false,
       });
 
-      expect(api.sendMessage).toHaveBeenCalledWith(123, "continuation complete");
+      expect(api.sendMessage).toHaveBeenCalledWith(123, "continuation complete", expect.anything());
       expect(logger.error).not.toHaveBeenCalled();
 
       const workflowState = JSON.parse(await readFile(path.join(root, "file-workflow.json"), "utf8")) as {
@@ -2563,6 +2591,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "documents/repo.zip" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await mkdir(path.dirname(destinationPath), { recursive: true });
@@ -2620,6 +2649,7 @@ describe("polling helpers", () => {
         .mockResolvedValueOnce({ message_id: 12 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "documents/repo.zip" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await mkdir(path.dirname(destinationPath), { recursive: true });
@@ -2669,6 +2699,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "documents/repo.zip" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await mkdir(path.dirname(destinationPath), { recursive: true });
@@ -2774,6 +2805,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "documents/report.pdf" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await mkdir(path.dirname(destinationPath), { recursive: true });
@@ -2821,6 +2853,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -2864,6 +2897,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "docs/note.md" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await writeFile(destinationPath, "# Heading\nBody text");
@@ -2912,6 +2946,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: "photos/screenshot.jpg" }),
       downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
         await writeFile(destinationPath, "img");
@@ -2958,6 +2993,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -2983,7 +3019,7 @@ describe("polling helpers", () => {
     );
 
     expect(api.sendChatAction).toHaveBeenCalledWith(123);
-    expect(api.sendMessage).toHaveBeenCalledWith(123, "final response");
+    expect(api.sendMessage).toHaveBeenCalledWith(123, "final response", expect.anything());
     expect(api.editMessage).not.toHaveBeenCalled();
   });
 
@@ -2994,6 +3030,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3020,7 +3057,7 @@ describe("polling helpers", () => {
       );
 
       expect(api.sendChatAction).toHaveBeenCalledWith(123);
-      expect(api.sendMessage).toHaveBeenCalledWith(123, "final response");
+      expect(api.sendMessage).toHaveBeenCalledWith(123, "final response", expect.anything());
       expect(api.editMessage).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -3054,6 +3091,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3186,6 +3224,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3235,6 +3274,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3285,6 +3325,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3338,6 +3379,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3391,6 +3433,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3436,6 +3479,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3479,6 +3523,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3545,6 +3590,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3601,6 +3647,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3651,6 +3698,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3697,6 +3745,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3747,6 +3796,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3808,6 +3858,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3855,6 +3906,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3889,6 +3941,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3926,6 +3979,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -3968,6 +4022,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -4005,6 +4060,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -4029,8 +4085,8 @@ describe("polling helpers", () => {
       },
     );
 
-    expect(api.sendMessage).toHaveBeenCalledWith(123, "a".repeat(4000));
-    expect(api.sendMessage).toHaveBeenCalledWith(123, "a".repeat(500));
+    expect(api.sendMessage).toHaveBeenCalledWith(123, "a".repeat(4000), expect.anything());
+    expect(api.sendMessage).toHaveBeenCalledWith(123, "a".repeat(500), expect.anything());
     expect(api.sendMessage).toHaveBeenCalledTimes(2);
   });
 
@@ -4043,6 +4099,7 @@ describe("polling helpers", () => {
         .mockResolvedValueOnce({ message_id: 12 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -4078,6 +4135,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
     };
@@ -4123,6 +4181,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       sendDocument: vi.fn().mockResolvedValue({ message_id: 12 }),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
@@ -4160,6 +4219,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       sendDocument: vi.fn().mockResolvedValue({ message_id: 12 }),
       getFile: vi.fn(),
       downloadFile: vi.fn(),
@@ -4216,6 +4276,7 @@ describe("polling helpers", () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
       sendDocument: vi.fn().mockResolvedValue({ message_id: 12 }),
       getFile: vi.fn(),
       downloadFile: vi.fn(),

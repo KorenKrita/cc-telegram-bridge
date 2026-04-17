@@ -280,7 +280,25 @@ export class ProcessClaudeAdapter implements CodexAdapter {
     }
 
     try {
-      const json = JSON.parse(trimmed) as ClaudeJsonResult;
+      const parsed = JSON.parse(trimmed);
+
+      // Claude CLI outputs a JSON array with multiple events; find the result
+      // object (type="result") or fall back to the last element.
+      let json: ClaudeJsonResult;
+      if (Array.isArray(parsed)) {
+        const resultItem = parsed
+          .slice()
+          .reverse()
+          .find(
+            (item: unknown) =>
+              item &&
+              typeof item === "object" &&
+              (item as Record<string, unknown>).type === "result",
+          ) as ClaudeJsonResult | undefined;
+        json = resultItem ?? parsed[parsed.length - 1];
+      } else {
+        json = parsed;
+      }
 
       if (json.is_error) {
         throw new Error(json.result ?? "Unknown error from Claude CLI");

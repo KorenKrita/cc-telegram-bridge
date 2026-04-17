@@ -52,7 +52,7 @@ export function renderTelegramHelpMessage(locale: Locale = "en"): string {
       "Telegram 命令：",
       "/status - 显示引擎、会话和文件任务状态",
       "/effort [low|medium|high|xhigh|max|off] - 设置推理强度（xhigh 仅 Opus 4.7）",
-      "/model [名称|off] - 切换模型",
+      "/model [名称|off] - 切换模型（加 [1m] 后缀启用 1M 上下文，如 opus[1m]）",
       "/btw <问题> - 旁问（不影响当前会话）",
       "/ask <实例> <提示> - 将任务委托给另一个 bot",
       "/fan <提示> - 并行查询多个 bot 并汇总结果",
@@ -63,6 +63,8 @@ export function renderTelegramHelpMessage(locale: Locale = "en"): string {
       "/resume - 恢复本地 session 到 Telegram 继续",
       "/detach - 断开恢复的 session，回到默认工作区",
       "/stop - 立即停止当前任务",
+      "/context - 显示 Claude 上下文用量（仅 Claude；用来决定何时 /compact）",
+      "/usage - 显示本实例累计 token 和费用",
       "/compact - 压缩当前会话上下文",
       "/ultrareview - 代码审查（仅 Claude Opus 4.7+，常配合 /resume 到本地项目使用）",
       "/reset - 清除当前聊天的会话",
@@ -73,7 +75,7 @@ export function renderTelegramHelpMessage(locale: Locale = "en"): string {
     "Telegram commands:",
     "/status - show engine, session, and file task state",
     "/effort [low|medium|high|xhigh|max|off] - set reasoning effort level (xhigh is Opus 4.7 only)",
-    "/model [name|off] - switch model",
+    "/model [name|off] - switch model (append [1m] for 1M context, e.g. opus[1m])",
     "/btw <question> - side question without affecting session",
     "/ask <instance> <prompt> - delegate a task to another bot",
     "/fan <prompt> - query multiple bots in parallel and combine results",
@@ -84,6 +86,8 @@ export function renderTelegramHelpMessage(locale: Locale = "en"): string {
     "/resume - resume a local session on Telegram",
     "/detach - detach from resumed session, back to default workspace",
     "/stop - immediately stop the current task",
+    "/context - show Claude context fill level (Claude only; helps decide when to /compact)",
+    "/usage - show cumulative token & cost usage for this instance",
     "/compact - compress the current session context",
     "/ultrareview - dedicated code review (Claude Opus 4.7+ only; usually paired with /resume into a local project)",
     "/reset - clear the current chat session",
@@ -130,6 +134,46 @@ export function renderTelegramStatusMessage(input: {
     input.taskStateWarning
       ? `Waiting file tasks: unknown (${input.taskStateWarning})`
       : `Waiting file tasks: ${waitingTasks}`,
+  ].join("\n");
+}
+
+export function renderUsageMessage(
+  usage: {
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalCachedTokens: number;
+    totalCostUsd: number;
+    requestCount: number;
+    lastUpdatedAt: string;
+  },
+  locale: Locale = "en",
+): string {
+  if (usage.requestCount === 0) {
+    return locale === "zh"
+      ? "暂无用量数据——处理完一轮请求后再查。"
+      : "No usage data yet — run a request first.";
+  }
+  const cost = usage.totalCostUsd.toFixed(4);
+  const lastSeen = usage.lastUpdatedAt || "never";
+  if (locale === "zh") {
+    return [
+      `累计用量（本实例）：`,
+      `• 请求数：${usage.requestCount.toLocaleString()}`,
+      `• 输入 tokens：${usage.totalInputTokens.toLocaleString()}`,
+      `• 输出 tokens：${usage.totalOutputTokens.toLocaleString()}`,
+      `• 缓存 tokens：${usage.totalCachedTokens.toLocaleString()}`,
+      `• 花销：$${cost}`,
+      `• 最近更新：${lastSeen}`,
+    ].join("\n");
+  }
+  return [
+    `Cumulative usage (this instance):`,
+    `• Requests: ${usage.requestCount.toLocaleString()}`,
+    `• Input tokens: ${usage.totalInputTokens.toLocaleString()}`,
+    `• Output tokens: ${usage.totalOutputTokens.toLocaleString()}`,
+    `• Cached tokens: ${usage.totalCachedTokens.toLocaleString()}`,
+    `• Cost: $${cost}`,
+    `• Last updated: ${lastSeen}`,
   ].join("\n");
 }
 

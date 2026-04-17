@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { lstat, mkdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Bridge } from "../runtime/bridge.js";
@@ -64,41 +64,100 @@ function parseResumeState(raw: unknown): ResumeState | undefined {
   };
 }
 
+const DEFAULT_INSTANCE_CONFIG: InstanceConfig = {
+  engine: "codex",
+  locale: "en",
+  verbosity: 1,
+  budgetUsd: undefined,
+  effort: undefined,
+  model: undefined,
+  resume: undefined,
+};
+
 async function loadInstanceConfig(stateDir: string): Promise<InstanceConfig> {
+  const configPath = path.join(stateDir, "config.json");
+  let raw: string;
   try {
-    const raw = await readFile(path.join(stateDir, "config.json"), "utf8");
-    const config = JSON.parse(raw) as {
-      engine?: string;
-      locale?: string;
-      verbosity?: number;
-      budgetUsd?: number;
-      effort?: string;
-      model?: string;
-      resume?: unknown;
-    };
-    const effort = VALID_EFFORT_LEVELS.includes(config.effort as EffortLevel) ? config.effort as EffortLevel : undefined;
-    return {
-      engine: config.engine === "claude" ? "claude" : "codex",
-      locale: config.locale === "zh" ? "zh" : "en",
-      verbosity: config.verbosity === 0 ? 0 : config.verbosity === 2 ? 2 : 1,
-      budgetUsd: typeof config.budgetUsd === "number" && config.budgetUsd > 0 ? config.budgetUsd : undefined,
-      effort,
-      model: typeof config.model === "string" && config.model.trim() ? config.model.trim() : undefined,
-      resume: parseResumeState(config.resume),
-    };
-  } catch {
-    return { engine: "codex", locale: "en", verbosity: 1, budgetUsd: undefined, effort: undefined, model: undefined, resume: undefined };
+    raw = await readFile(configPath, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // ENOENT is the normal "fresh instance" case — silently use defaults.
+    // Anything else (EACCES, EIO, …) means the file exists but is unreadable;
+    // log so the operator knows the bot is running on defaults, not on the
+    // config they actually wrote. Previously any error silently switched the
+    // instance back to codex/en defaults, which is a serious footgun.
+    if (code !== "ENOENT") {
+      console.error(
+        `Failed to read ${configPath}, falling back to defaults:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+    return { ...DEFAULT_INSTANCE_CONFIG };
   }
+
+  let config: {
+    engine?: string;
+    locale?: string;
+    verbosity?: number;
+    budgetUsd?: number;
+    effort?: string;
+    model?: string;
+    resume?: unknown;
+  };
+  try {
+    config = JSON.parse(raw);
+  } catch (error) {
+    // Corrupt JSON — treat as a real error, not an invisible default. A
+    // half-written config.json would otherwise silently flip Claude
+    // instances to the codex default and strip their model / effort / resume
+    // state until someone noticed the behavioral change.
+    console.error(
+      `Malformed ${configPath} (${error instanceof Error ? error.message : error}); running on defaults until this is repaired.`,
+    );
+    return { ...DEFAULT_INSTANCE_CONFIG };
+  }
+
+  const effort = VALID_EFFORT_LEVELS.includes(config.effort as EffortLevel) ? config.effort as EffortLevel : undefined;
+  return {
+    engine: config.engine === "claude" ? "claude" : "codex",
+    locale: config.locale === "zh" ? "zh" : "en",
+    verbosity: config.verbosity === 0 ? 0 : config.verbosity === 2 ? 2 : 1,
+    budgetUsd: typeof config.budgetUsd === "number" && config.budgetUsd > 0 ? config.budgetUsd : undefined,
+    effort,
+    model: typeof config.model === "string" && config.model.trim() ? config.model.trim() : undefined,
+    resume: parseResumeState(config.resume),
+  };
 }
 
 async function updateInstanceConfig(stateDir: string, updater: (config: Record<string, unknown>) => void): Promise<void> {
   const configPath = path.join(stateDir, "config.json");
   let config: Record<string, unknown> = {};
   try {
-    config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
-  } catch { /* start fresh */ }
+    const existing = await readFile(configPath, "utf8");
+    config = JSON.parse(existing) as Record<string, unknown>;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      // Don't silently blow away unreadable config — a partial overwrite
+      // would be much worse than refusing to write.
+      throw error;
+    }
+    // ENOENT is fine — we're about to create it.
+  }
   updater(config);
-  await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
+  // Atomic write: staging file then rename. Without this, a process kill
+  // mid-write produces a truncated config.json that reads as either JSON
+  // parse error (→ loud default fallback via loadInstanceConfig) or partial
+  // object with missing fields (→ silent flip back to defaults for the
+  // fields that got cut off).
+  const tempPath = `${configPath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempPath, JSON.stringify(config, null, 2) + "\n", "utf8");
+  try {
+    await rename(tempPath, configPath);
+  } catch (error) {
+    await unlink(tempPath).catch(() => {});
+    throw error;
+  }
 }
 
 async function appendAuditEventBestEffort(stateDir: string, event: Parameters<typeof appendAuditEvent>[1]): Promise<void> {
@@ -131,6 +190,7 @@ import {
   renderSessionStateErrorMessage,
   renderSessionResetMessage,
   renderUsageMessage,
+  type Locale,
 } from "./message-renderer.js";
 import { TelegramApi } from "./api.js";
 import type { NormalizedTelegramAttachment, NormalizedTelegramMessage } from "./update-normalizer.js";
@@ -428,12 +488,42 @@ async function sendFileOrPhoto(api: TelegramApi, chatId: number, filename: strin
   await api.sendDocument(chatId, filename, contents);
 }
 
+type RejectReason =
+  | "outside-workspace"
+  | "not-a-file"
+  | "too-large"
+  | "not-found"
+  | "permission-denied"
+  | "read-error";
+
+function renderRejectReason(reason: RejectReason, detail: string | undefined, locale: Locale): string {
+  if (locale === "zh") {
+    switch (reason) {
+      case "outside-workspace": return "超出工作目录";
+      case "not-a-file": return "不是普通文件";
+      case "too-large": return `文件过大（${detail} > 50MB）`;
+      case "not-found": return "文件不存在";
+      case "permission-denied": return "无读取权限";
+      case "read-error": return "读取失败";
+    }
+  }
+  switch (reason) {
+    case "outside-workspace": return "outside workspace";
+    case "not-a-file": return "not a regular file";
+    case "too-large": return `too large (${detail} > 50MB)`;
+    case "not-found": return "file not found";
+    case "permission-denied": return "permission denied";
+    case "read-error": return "read error";
+  }
+}
+
 async function deliverTelegramResponse(
   api: TelegramApi,
   chatId: number,
   text: string,
   inboxDir: string,
   workspaceOverride?: string,
+  locale: Locale = "en",
 ): Promise<number> {
   let filesSent = 0;
   // Handle inline text file blocks
@@ -482,7 +572,7 @@ async function deliverTelegramResponse(
   // Collect referenced files from disk
   const imageFiles: Array<{ filename: string; contents: Uint8Array }> = [];
   const otherFiles: Array<{ filename: string; contents: Uint8Array | string }> = [];
-  const rejected: Array<{ path: string; reason: string }> = [];
+  const rejected: Array<{ path: string; reason: RejectReason; detail?: string }> = [];
 
   const deliveryStateDir = path.dirname(inboxDir);
   const workspacePrefix = path.join(deliveryStateDir, "workspace") + path.sep;
@@ -492,7 +582,7 @@ async function deliverTelegramResponse(
     try {
       const real = await realpath(filePath);
       if (!real.startsWith(workspacePrefix) && !(overridePrefix && real.startsWith(overridePrefix))) {
-        rejected.push({ path: filePath, reason: "outside workspace" });
+        rejected.push({ path: filePath, reason: "outside-workspace" });
         continue;
       }
       // realpath already resolved any symlinks; lstat here operates on the
@@ -500,11 +590,11 @@ async function deliverTelegramResponse(
       // pointing outside the sandbox was already caught by the prefix test.
       const stats = await lstat(real);
       if (!stats.isFile()) {
-        rejected.push({ path: filePath, reason: "not a regular file" });
+        rejected.push({ path: filePath, reason: "not-a-file" });
         continue;
       }
       if (stats.size > 50_000_000) {
-        rejected.push({ path: filePath, reason: `too large (${Math.round(stats.size / 1_000_000)}MB > 50MB)` });
+        rejected.push({ path: filePath, reason: "too-large", detail: `${Math.round(stats.size / 1_000_000)}MB` });
         continue;
       }
       const contents = await readFile(real);
@@ -516,7 +606,8 @@ async function deliverTelegramResponse(
       }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException)?.code;
-      const reason = code === "ENOENT" ? "file not found" : code === "EACCES" ? "permission denied" : "read error";
+      const reason: RejectReason =
+        code === "ENOENT" ? "not-found" : code === "EACCES" ? "permission-denied" : "read-error";
       rejected.push({ path: filePath, reason });
     }
   }
@@ -535,12 +626,16 @@ async function deliverTelegramResponse(
     const MAX_SHOWN = 5;
     const shown = rejected.slice(0, MAX_SHOWN);
     const extra = rejected.length - shown.length;
-    const lines = [
-      `⚠ ${rejected.length} file${rejected.length === 1 ? "" : "s"} not delivered:`,
-      ...shown.map(({ path: p, reason }) => `• ${p} — ${reason}`),
-    ];
-    if (extra > 0) lines.push(`… and ${extra} more`);
-    lines.push("Files must live under the bot's workspace (or a /resume'd project dir).");
+    const header = locale === "zh"
+      ? `⚠ 有 ${rejected.length} 个文件未能送达：`
+      : `⚠ ${rejected.length} file${rejected.length === 1 ? "" : "s"} not delivered:`;
+    const moreLine = locale === "zh" ? `…还有 ${extra} 个` : `… and ${extra} more`;
+    const footer = locale === "zh"
+      ? "文件必须位于本 bot 的工作目录内（或通过 /resume 指定的项目目录）。"
+      : "Files must live under the bot's workspace (or a /resume'd project dir).";
+    const lines = [header, ...shown.map(({ path: p, reason, detail }) => `• ${p} — ${renderRejectReason(reason, detail, locale)}`)];
+    if (extra > 0) lines.push(moreLine);
+    lines.push(footer);
     await api.sendMessage(chatId, lines.join("\n"));
   }
 
@@ -1641,7 +1736,7 @@ export async function handleNormalizedTelegramMessage(
       // Non-streaming: always use full delivery
       // Streaming + files: need deliverTelegramResponse to extract and send attachments
       // Streaming + long text: progress card truncated; send full chunked version
-      await deliverTelegramResponse(context.api, normalized.chatId, result.text, context.inboxDir, cfg.resume?.workspacePath);
+      await deliverTelegramResponse(context.api, normalized.chatId, result.text, context.inboxDir, cfg.resume?.workspacePath, locale);
     } else {
       // Streaming short response: the progress card already shows the complete text.
       // No need to send a duplicate message.

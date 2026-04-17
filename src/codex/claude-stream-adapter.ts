@@ -130,6 +130,8 @@ type PendingTurn = {
   startTime: number;
 };
 
+type AsyncMessageHandler = (text: string) => void;
+
 type ClaudeWorker = {
   child: ClaudeChildProcess;
   lineBuffer: string;
@@ -138,6 +140,7 @@ type ClaudeWorker = {
   instructions: string | null;
   approvalMode: ApprovalMode;
   engineOptionsKey: string;
+  onAsyncMessage?: AsyncMessageHandler;
 };
 
 const MAX_INSTRUCTIONS_CHARS = 16_000;
@@ -285,7 +288,7 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     const approvalMode = this.configPath ? await this.loadApprovalMode() : "normal";
     const engineOptions = this.configPath ? await this.loadEngineOptions() : {};
     const prompt = this.buildPrompt(input);
-    const worker = this.getOrCreateWorker(sessionId, agentInstructions, bridgeInstructions, approvalMode, engineOptions);
+    const worker = this.getOrCreateWorker(sessionId, agentInstructions, bridgeInstructions, approvalMode, engineOptions, input.onAsyncMessage);
 
     const response = await this.sendTurn(worker, prompt, input.onProgressState, input.abortSignal);
     const nextSessionId = response.sessionId;
@@ -308,12 +311,16 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     return parts.join("\n");
   }
 
-  private getOrCreateWorker(sessionId: string, agentInstructions: string | null, bridgeInstructions: string | null, approvalMode: ApprovalMode, engineOptions?: { effort?: string; model?: string }): ClaudeWorker {
+  private getOrCreateWorker(sessionId: string, agentInstructions: string | null, bridgeInstructions: string | null, approvalMode: ApprovalMode, engineOptions?: { effort?: string; model?: string }, onAsyncMessage?: AsyncMessageHandler): ClaudeWorker {
     const combinedKey = combineInstructions(agentInstructions, bridgeInstructions);
     const optionsKey = `${engineOptions?.effort ?? ""}:${engineOptions?.model ?? ""}`;
     const existing = this.workers.get(sessionId);
     if (existing) {
       if (existing.instructions === combinedKey && existing.approvalMode === approvalMode && existing.engineOptionsKey === optionsKey) {
+        // Update onAsyncMessage if changed
+        if (onAsyncMessage) {
+          existing.onAsyncMessage = onAsyncMessage;
+        }
         return existing;
       }
 
@@ -369,6 +376,7 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       instructions: combinedKey,
       approvalMode,
       engineOptionsKey: optionsKey,
+      onAsyncMessage,
     };
 
     child.stdout?.on("data", (chunk) => {
@@ -419,6 +427,27 @@ export class ClaudeStreamAdapter implements CodexAdapter {
 
     if (parsed.session_id) {
       worker.currentSessionId = parsed.session_id;
+    }
+
+    // Handle async messages (e.g., task notifications) when no pending turn
+    if (parsed.type === "assistant" && !worker.pendingTurn) {
+      const content = parsed.message?.content ?? [];
+      let text = "";
+      for (const item of content) {
+        if (item.type === "text" && typeof item.text === "string") {
+          text += item.text;
+        }
+      }
+      if (text.trim()) {
+        if (worker.onAsyncMessage) {
+          Promise.resolve(worker.onAsyncMessage(text.trim())).catch(err => {
+            console.error("[ClaudeStreamAdapter] Async message delivery failed:", err);
+          });
+        } else {
+          console.warn("[ClaudeStreamAdapter] Received async message but onAsyncMessage handler not defined");
+        }
+      }
+      return;
     }
 
     if (parsed.type === "assistant" && worker.pendingTurn) {

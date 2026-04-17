@@ -27,6 +27,8 @@ export interface CodexUserMessageInput {
   onProgress?: (partialText: string) => void;
   /** Rich progress callback with state updates (thinking, tool calls, etc.) */
   onProgressState?: ProgressCallback;
+  /** Callback for async messages received when no pending turn (e.g., task notifications) */
+  onAsyncMessage?: (text: string) => void | Promise<void>;
   requestOutputDir?: string;
   workspaceOverride?: string;
   abortSignal?: AbortSignal;

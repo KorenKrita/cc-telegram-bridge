@@ -1673,6 +1673,15 @@ export async function handleNormalizedTelegramMessage(
       progressTimerId = setInterval(() => void tickProgress(), updateIntervalMs);
     }
 
+    // Handle async messages (e.g., task notifications from background tasks)
+    const onAsyncMessage = async (text: string): Promise<void> => {
+      // Stop typing indicator when async message arrives
+      stopTyping();
+      // Deliver the async message to the user
+      await deliverTelegramResponse(context.api, normalized.chatId, text, context.inboxDir, cfg.resume?.workspacePath, locale);
+      responded = true;
+    };
+
     const result = await context.bridge.handleAuthorizedMessage({
       chatId: normalized.chatId,
       userId: normalized.userId,
@@ -1682,6 +1691,7 @@ export async function handleNormalizedTelegramMessage(
       replyContext,
       files: requestFiles,
       onProgressState: updateIntervalMs !== null ? onProgress : undefined,
+      onAsyncMessage,
       requestOutputDir: telegramOutDirPath,
       workspaceOverride: cfg.resume?.workspacePath,
       abortSignal: context.abortSignal,

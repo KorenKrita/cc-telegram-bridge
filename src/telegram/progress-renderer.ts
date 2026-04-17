@@ -290,12 +290,10 @@ export function renderProgressHtml(state: ProgressState): string {
     const statParts: string[] = [];
     // Token usage — show in all states when available
     if (state.usage) {
-      const totalTokens = state.usage.inputTokens + state.usage.outputTokens;
-      const ctxPercent = totalTokens > 0 ? Math.round((totalTokens / 200000) * 100) : 0;
-      const tokensK = totalTokens >= 1000
-        ? `${(totalTokens / 1000).toFixed(1)}k`
-        : `${totalTokens}`;
-      statParts.push(`ctx: ${tokensK}/200k (${ctxPercent}%)`);
+      const { inputTokens, outputTokens } = state.usage;
+      const inK = inputTokens >= 1000 ? `${(inputTokens / 1000).toFixed(1)}k` : `${inputTokens}`;
+      const outK = outputTokens >= 1000 ? `${(outputTokens / 1000).toFixed(1)}k` : `${outputTokens}`;
+      statParts.push(`in: ${inK} | out: ${outK}`);
     }
     // Model + duration + cost — only on complete/error
     if (state.status === "complete" || state.status === "error") {

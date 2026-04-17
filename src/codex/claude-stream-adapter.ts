@@ -113,6 +113,7 @@ type ClaudeStreamEvent = {
     input_tokens?: number;
     output_tokens?: number;
     cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
   };
   total_cost_usd?: number;
 };
@@ -140,6 +141,7 @@ type ClaudeWorker = {
   instructions: string | null;
   approvalMode: ApprovalMode;
   engineOptionsKey: string;
+  model?: string;
   onAsyncMessage?: AsyncMessageHandler;
 };
 
@@ -376,6 +378,7 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       instructions: combinedKey,
       approvalMode,
       engineOptionsKey: optionsKey,
+      model: engineOptions?.model,
       onAsyncMessage,
     };
 
@@ -526,7 +529,8 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       const usage = parsed.usage ? {
         inputTokens: parsed.usage.input_tokens ?? 0,
         outputTokens: parsed.usage.output_tokens ?? 0,
-        cachedTokens: parsed.usage.cache_read_input_tokens ?? 0,
+        cacheReadTokens: parsed.usage.cache_read_input_tokens ?? 0,
+        cacheCreationTokens: parsed.usage.cache_creation_input_tokens ?? 0,
         costUsd: parsed.total_cost_usd ?? undefined,
       } : undefined;
 
@@ -574,6 +578,7 @@ export class ClaudeStreamAdapter implements CodexAdapter {
           userPrompt: prompt,
           responseText: "",
           toolCalls: [],
+          model: worker.model,
         },
       };
       worker.pendingTurn = pendingTurn;

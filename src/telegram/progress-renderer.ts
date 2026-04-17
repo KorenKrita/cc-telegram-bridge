@@ -285,31 +285,38 @@ export function renderProgressHtml(state: ProgressState): string {
     parts.push(`<b>❌ Error:</b> ${escapeHtml(state.errorMessage)}`);
   }
 
-  // Stats — show context usage during all states, full stats on complete/error
-  {
-    const statParts: string[] = [];
-    // Token usage — show in all states when available
-    if (state.usage) {
-      const { inputTokens, outputTokens } = state.usage;
-      const inK = inputTokens >= 1000 ? `${(inputTokens / 1000).toFixed(1)}k` : `${inputTokens}`;
-      const outK = outputTokens >= 1000 ? `${(outputTokens / 1000).toFixed(1)}k` : `${outputTokens}`;
-      statParts.push(`in: ${inK} | out: ${outK}`);
+  // Stats — show detailed usage info
+  if (state.usage) {
+    const { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd } = state.usage;
+
+    // Format tokens (show as k if >= 1000)
+    const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+
+    // Build token details
+    const inParts: string[] = [];
+    const actualInput = inputTokens - (cacheReadTokens ?? 0); // Non-cached input
+    if (actualInput > 0) inParts.push(fmt(actualInput));
+    if (cacheReadTokens) inParts.push(`↺${fmt(cacheReadTokens)}`); // Cache hit
+    if (cacheCreationTokens) inParts.push(`+${fmt(cacheCreationTokens)}`); // Cache write
+
+    const tokenLine = `📝 In: ${inParts.join(" ") || fmt(inputTokens)} | Out: ${fmt(outputTokens)}`;
+
+    // Build cost/time line (complete/error only)
+    const metaParts: string[] = [];
+    if (state.model) {
+      metaParts.push(state.model.replace(/^claude-/, ""));
     }
-    // Model + duration + cost — only on complete/error
-    if (state.status === "complete" || state.status === "error") {
-      if (state.model) {
-        statParts.push(state.model.replace(/^claude-/, ""));
-      }
-      if (state.durationMs !== undefined && state.durationMs > 0) {
-        statParts.push(`${(state.durationMs / 1000).toFixed(1)}s`);
-      }
-      if (state.usage?.costUsd !== undefined) {
-        statParts.push(`$${state.usage.costUsd.toFixed(2)}`);
-      }
+    if (state.durationMs !== undefined && state.durationMs > 0) {
+      metaParts.push(`${(state.durationMs / 1000).toFixed(1)}s`);
     }
-    if (statParts.length > 0) {
-      parts.push("");
-      parts.push(`<i>${escapeHtml(statParts.join(" | "))}</i>`);
+    if (costUsd !== undefined) {
+      metaParts.push(costUsd < 0.01 ? `$${costUsd.toFixed(4)}` : `$${costUsd.toFixed(2)}`);
+    }
+
+    parts.push("");
+    parts.push(`<i>${escapeHtml(tokenLine)}</i>`);
+    if (metaParts.length > 0 && (state.status === "complete" || state.status === "error")) {
+      parts.push(`<i>⏱ ${escapeHtml(metaParts.join(" | "))}</i>`);
     }
   }
 

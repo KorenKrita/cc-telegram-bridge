@@ -5,7 +5,12 @@ export interface CodexSessionHandle {
 export interface AdapterUsage {
   inputTokens: number;
   outputTokens: number;
+  /** @deprecated Use cacheReadTokens instead */
   cachedTokens?: number;
+  /** Tokens read from cache (cache hit) */
+  cacheReadTokens?: number;
+  /** Tokens written to cache (cache creation) */
+  cacheCreationTokens?: number;
   costUsd?: number;
 }
 

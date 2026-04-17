@@ -69,11 +69,9 @@ function markdownToTelegramHtml(md: string): string {
         // End of code block
         inCodeBlock = false;
         const codeContent = escapeHtml(codeBlockLines.join("\n"));
-        if (codeBlockLang) {
-          result.push(`<pre><code class="language-${escapeHtml(codeBlockLang)}">${codeContent}</code></pre>`);
-        } else {
-          result.push(`<pre>${codeContent}</pre>`);
-        }
+        // Telegram HTML parse_mode doesn't support class attributes on code tags
+        // Just wrap code blocks in <pre><code> without language class
+        result.push(`<pre><code>${codeContent}</code></pre>`);
       }
       continue;
     }

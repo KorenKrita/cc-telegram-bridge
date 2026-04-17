@@ -1498,11 +1498,15 @@ export async function handleNormalizedTelegramMessage(
         try {
           const msg = await context.api.sendMessage(normalized.chatId, html, { parseMode: "HTML" });
           progressMessageId = msg.message_id;
-        } catch {
+        } catch (err: unknown) {
+          // Fallback to plain text
           try {
-            const msg = await context.api.sendMessage(normalized.chatId, state.status === "thinking" ? "🔵 Thinking..." : "⏳ Running...");
+            const fallbackText = state.status === "thinking" ? "🔵 Thinking..." : "⏳ Running...";
+            const msg = await context.api.sendMessage(normalized.chatId, fallbackText);
             progressMessageId = msg.message_id;
-          } catch { /* ignore */ }
+          } catch {
+            // Both HTML and fallback failed — nothing more we can do
+          }
         }
       } else {
         try {
@@ -1516,7 +1520,13 @@ export async function handleNormalizedTelegramMessage(
             progressMessageId = undefined;
             return;
           }
-          // Other errors (rate limit, etc.) — ignore
+          // Can't parse message text (bad HTML) — fall back to plain text edit
+          if (desc.includes("can't parse")) {
+            const fallbackText = state.status === "complete" ? "✅ Complete" : state.status === "error" ? "❌ Error" : "⏳ Running...";
+            await context.api.editMessage(normalized.chatId, progressMessageId, fallbackText).catch(() => {});
+            return;
+          }
+          // Other errors (rate limit, etc.) — ignore, next tick will retry
         }
       }
     };
@@ -1537,15 +1547,29 @@ export async function handleNormalizedTelegramMessage(
     // Flush: cancel timer and send the latest state immediately
     const flushProgress = async (): Promise<void> => {
       if (progressTimerId) { clearInterval(progressTimerId); progressTimerId = undefined; }
-      if (lastProgressState) {
-        sentProgressState = null; // Force send
+      if (lastProgressState && !sentProgressState) {
+        // Only send if we haven't already sent this state (onProgress may have
+        // already sent the final complete/error edit)
         await sendOrEditProgress(lastProgressState);
       }
     };
 
-    // onProgressState callback only saves state — never calls the API directly
+    // onProgressState callback saves state. When the engine signals completion,
+    // immediately update the progress card and stop typing — don't wait for the
+    // next timer tick or flushProgress, both of which come later.
     const onProgress = (state: ProgressState): void => {
       lastProgressState = { ...state };
+      if (state.status === "complete" || state.status === "error") {
+        stopTyping();
+        // Cancel the periodic timer — no more ticks needed
+        if (progressTimerId) { clearInterval(progressTimerId); progressTimerId = undefined; }
+        // Immediately edit the progress card to show the final state.
+        // Skip the in-flight guard — the final complete/error edit must go out
+        // ASAP so Telegram dismisses the typing indicator.
+        sentProgressState = { ...state };
+        progressUpdateInFlight = true;
+        sendOrEditProgress(state).finally(() => { progressUpdateInFlight = false; });
+      }
     };
 
     if (updateIntervalMs !== null) {
@@ -1568,7 +1592,9 @@ export async function handleNormalizedTelegramMessage(
       abortSignal: context.abortSignal,
     });
 
-    // Flush the final progress state (adapter already emitted a complete state)
+    // Flush the final progress state (adapter already emitted a complete state).
+    // onProgress already stopped typing and added a reaction when the complete
+    // state arrived; flushProgress just ensures the card shows the final content.
     if (updateIntervalMs !== null) {
       await flushProgress();
     }
@@ -1598,16 +1624,27 @@ export async function handleNormalizedTelegramMessage(
       }
     }
 
-    // Deliver full response: in streaming mode, the progress card is truncated to
-    // 4096 chars. For long responses or responses with file blocks, send the full
-    // text via the normal delivery path (which handles chunking + file extraction).
+    // Decide whether to send a separate full-text message after the progress card.
+    // In streaming mode, the progress card already displays the final complete text
+    // via editMessage. Only send a separate delivery when:
+    //   - Non-streaming (no progress card was ever sent)
+    //   - Response has file blocks that need extraction ([send-file:] tags, ```file: blocks)
+    //   - Response is long enough that the progress card truncated it (4096-char limit)
     const hasFileBlocks = /```file:\S+\n/.test(result.text);
-    if (updateIntervalMs === null) {
+    const hasFileTags = /\[send-file:[^\]]+\]/.test(result.text);
+    const needsFileDelivery = hasFileBlocks || hasFileTags;
+    // The progress card includes header/tool-call stats which add ~200 chars overhead,
+    // plus markdownToTelegramHtml expansion. Use 3200 as a safe threshold to detect
+    // responses that would be truncated in the progress card.
+    const likelyTruncated = result.text.length > 3200;
+    if (updateIntervalMs === null || needsFileDelivery || likelyTruncated) {
       // Non-streaming: always use full delivery
+      // Streaming + files: need deliverTelegramResponse to extract and send attachments
+      // Streaming + long text: progress card truncated; send full chunked version
       await deliverTelegramResponse(context.api, normalized.chatId, result.text, context.inboxDir, cfg.resume?.workspacePath);
-    } else if (result.text.length > 3500 || hasFileBlocks) {
-      // Streaming but response too long / has file blocks — send full version separately
-      await deliverTelegramResponse(context.api, normalized.chatId, result.text, context.inboxDir, cfg.resume?.workspacePath);
+    } else {
+      // Streaming short response: the progress card already shows the complete text.
+      // No need to send a duplicate message.
     }
     responded = true;
 

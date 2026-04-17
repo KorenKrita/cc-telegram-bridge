@@ -134,6 +134,8 @@ import {
 } from "./message-renderer.js";
 import { TelegramApi } from "./api.js";
 import type { NormalizedTelegramAttachment, NormalizedTelegramMessage } from "./update-normalizer.js";
+import { renderProgressHtml, shouldUpdateDisplay, getUpdateIntervalMs } from "./progress-renderer.js";
+import type { ProgressState } from "../codex/progress-types.js";
 
 export interface TelegramDeliveryContext {
   api: TelegramApi;
@@ -1481,6 +1483,77 @@ export async function handleNormalizedTelegramMessage(
       }
     }
 
+    // Handle verbosity-based streaming: 0=no streaming, 1=2s interval, 2=1s interval
+    const updateIntervalMs = getUpdateIntervalMs(cfg.verbosity);
+    let progressMessageId: number | undefined;
+    let lastProgressState: ProgressState | null = null;
+    let sentProgressState: ProgressState | null = null;
+    let progressTimerId: ReturnType<typeof setInterval> | undefined;
+    let progressUpdateInFlight = false;
+
+    // Send or edit the progress message (internal — called only by the timer)
+    const sendOrEditProgress = async (state: ProgressState): Promise<void> => {
+      const html = renderProgressHtml(state);
+      if (!progressMessageId) {
+        try {
+          const msg = await context.api.sendMessage(normalized.chatId, html, { parseMode: "HTML" });
+          progressMessageId = msg.message_id;
+        } catch {
+          try {
+            const msg = await context.api.sendMessage(normalized.chatId, state.status === "thinking" ? "🔵 Thinking..." : "⏳ Running...");
+            progressMessageId = msg.message_id;
+          } catch { /* ignore */ }
+        }
+      } else {
+        try {
+          await context.api.editMessage(normalized.chatId, progressMessageId, html, { parseMode: "HTML" });
+        } catch (err: unknown) {
+          const desc = (err as { description?: string })?.description ?? "";
+          // "message is not modified" — content unchanged, harmless
+          if (desc.includes("message is not modified")) return;
+          // Message was deleted — next cycle will send a new one
+          if (desc.includes("message to edit not found")) {
+            progressMessageId = undefined;
+            return;
+          }
+          // Other errors (rate limit, etc.) — ignore
+        }
+      }
+    };
+
+    // Timer-driven progress send with mutex guard to avoid concurrent API calls
+    const tickProgress = async (): Promise<void> => {
+      if (progressUpdateInFlight) return;
+      if (!lastProgressState || !shouldUpdateDisplay(sentProgressState, lastProgressState)) return;
+      progressUpdateInFlight = true;
+      sentProgressState = { ...lastProgressState };
+      try {
+        await sendOrEditProgress(sentProgressState);
+      } finally {
+        progressUpdateInFlight = false;
+      }
+    };
+
+    // Flush: cancel timer and send the latest state immediately
+    const flushProgress = async (): Promise<void> => {
+      if (progressTimerId) { clearInterval(progressTimerId); progressTimerId = undefined; }
+      if (lastProgressState) {
+        sentProgressState = null; // Force send
+        await sendOrEditProgress(lastProgressState);
+      }
+    };
+
+    // onProgressState callback only saves state — never calls the API directly
+    const onProgress = (state: ProgressState): void => {
+      lastProgressState = { ...state };
+    };
+
+    if (updateIntervalMs !== null) {
+      // First tick fires quickly (200ms) to show "Thinking..." without delay
+      setTimeout(() => void tickProgress(), 200);
+      progressTimerId = setInterval(() => void tickProgress(), updateIntervalMs);
+    }
+
     const result = await context.bridge.handleAuthorizedMessage({
       chatId: normalized.chatId,
       userId: normalized.userId,
@@ -1489,10 +1562,16 @@ export async function handleNormalizedTelegramMessage(
       text: requestText,
       replyContext,
       files: requestFiles,
+      onProgressState: updateIntervalMs !== null ? onProgress : undefined,
       requestOutputDir: telegramOutDirPath,
       workspaceOverride: cfg.resume?.workspacePath,
       abortSignal: context.abortSignal,
     });
+
+    // Flush the final progress state (adapter already emitted a complete state)
+    if (updateIntervalMs !== null) {
+      await flushProgress();
+    }
 
     if (result.usage) {
       const usageStore = new UsageStore(stateDir);
@@ -1519,7 +1598,17 @@ export async function handleNormalizedTelegramMessage(
       }
     }
 
-    await deliverTelegramResponse(context.api, normalized.chatId, result.text, context.inboxDir, cfg.resume?.workspacePath);
+    // Deliver full response: in streaming mode, the progress card is truncated to
+    // 4096 chars. For long responses or responses with file blocks, send the full
+    // text via the normal delivery path (which handles chunking + file extraction).
+    const hasFileBlocks = /```file:\S+\n/.test(result.text);
+    if (updateIntervalMs === null) {
+      // Non-streaming: always use full delivery
+      await deliverTelegramResponse(context.api, normalized.chatId, result.text, context.inboxDir, cfg.resume?.workspacePath);
+    } else if (result.text.length > 3500 || hasFileBlocks) {
+      // Streaming but response too long / has file blocks — send full version separately
+      await deliverTelegramResponse(context.api, normalized.chatId, result.text, context.inboxDir, cfg.resume?.workspacePath);
+    }
     responded = true;
 
     if (telegramOutDirPath) {

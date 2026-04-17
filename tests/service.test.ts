@@ -538,6 +538,7 @@ describe("polling helpers", () => {
       error: vi.fn(),
     };
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -592,6 +593,7 @@ describe("polling helpers", () => {
       error: vi.fn(),
     };
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -664,6 +666,7 @@ describe("polling helpers", () => {
       error: vi.fn(),
     };
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -851,6 +854,7 @@ describe("polling helpers", () => {
       error: vi.fn(),
     };
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       getUpdates: vi.fn().mockRejectedValue(new Error("temporary Telegram API failure")),
@@ -945,6 +949,7 @@ describe("polling helpers", () => {
       error: vi.fn(),
     };
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       getUpdates: vi.fn().mockRejectedValue(new Error("409 Conflict: terminated by other getUpdates request")),
@@ -1139,6 +1144,7 @@ describe("polling helpers", () => {
 
   it("downloads attachments and passes local file paths to the bridge", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -1203,6 +1209,7 @@ describe("polling helpers", () => {
 
   it("summarizes uploaded zip archives and waits for continue", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const zipBuffer = createZipBuffer({
       "README.md": "# hello",
@@ -1273,6 +1280,7 @@ describe("polling helpers", () => {
 
   it("shows a continue-analysis shortcut button after archive summary", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const zipBuffer = createZipBuffer({
       "README.md": "# hello",
@@ -1327,6 +1335,7 @@ describe("polling helpers", () => {
 
   it("persists a failed archive workflow record when extraction is rejected", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -1392,6 +1401,7 @@ describe("polling helpers", () => {
 
   it("rejects archive entries that escape into a sibling prefix directory", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const placeholderEntryName = "xxxxxxxxxxxxxxxxxxxxxxxxxx";
     const zipBuffer = replaceBufferContents(
@@ -1455,6 +1465,7 @@ describe("polling helpers", () => {
 
   it("continues analysis for the latest uploaded archive when requested", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const zipBuffer = createZipBuffer({
       "README.md": "# hello",
@@ -1534,6 +1545,7 @@ describe("polling helpers", () => {
 
   it("resumes the most recently updated waiting archive even when records are out of order", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -1627,6 +1639,7 @@ describe("polling helpers", () => {
 
   it("rejects new uploads when three archives are already waiting for continuation", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -1725,6 +1738,7 @@ describe("polling helpers", () => {
 
   it("marks a continued archive as failed when engine execution fails", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -1805,10 +1819,11 @@ describe("polling helpers", () => {
 
   it("does not mark a continued archive completed until Telegram delivery fully succeeds", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "config.json"),
-      JSON.stringify({ engine: "codex" }) + "\n",
+      JSON.stringify({ engine: "codex", verbosity: 0 }) + "\n",
       "utf8",
     );
     await writeFile(
@@ -1888,6 +1903,7 @@ describe("polling helpers", () => {
 
   it("still delivers the categorized Telegram error when workflow cleanup fails in catch", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -1974,6 +1990,7 @@ describe("polling helpers", () => {
 
   it("continues the archive selected by the clicked callback when multiple archives are waiting", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -2082,6 +2099,7 @@ describe("polling helpers", () => {
 
   it("continues the clicked archive even when callback ack fails", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -2153,6 +2171,7 @@ describe("polling helpers", () => {
 
   it("continues the replied archive summary when older and newer archives are both waiting", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -2241,6 +2260,7 @@ describe("polling helpers", () => {
 
   it("replies with an already-completed message when a replied summary targets a completed archive", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -2323,6 +2343,7 @@ describe("polling helpers", () => {
 
   it("replies with an already-processing message when the targeted continue button is pressed again mid-run", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -2388,6 +2409,7 @@ describe("polling helpers", () => {
 
   it("guides targeted archive retries back to the same summary after continuation fails", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -2457,6 +2479,7 @@ describe("polling helpers", () => {
 
   it("fails closed for malformed targeted /continue --upload syntax instead of resuming the latest archive", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -2523,6 +2546,7 @@ describe("polling helpers", () => {
 
   it("retries a failed archive when the targeted continue button is pressed again", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -2611,6 +2635,7 @@ describe("polling helpers", () => {
 
   it("stores the archive summary message id for reply-based continuation targeting", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const zipBuffer = createZipBuffer({
       "README.md": "# hello",
@@ -2664,6 +2689,7 @@ describe("polling helpers", () => {
 
   it("keeps a delivered archive summary visible when late bookkeeping fails", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const zipBuffer = createZipBuffer({
       "README.md": "# hello",
@@ -2729,6 +2755,7 @@ describe("polling helpers", () => {
       error: vi.fn(),
     };
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "file-workflow.json"),
@@ -2798,6 +2825,7 @@ describe("polling helpers", () => {
 
   it("bounds a long archive summary before sending it with the continue keyboard", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const manyFiles = Object.fromEntries(
       Array.from({ length: 500 }, (_, index) => [
@@ -2858,6 +2886,7 @@ describe("polling helpers", () => {
 
   it("persists the archive summary message id even when summary delivery fails", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const zipBuffer = createZipBuffer({
       "README.md": "# hello",
@@ -2913,6 +2942,7 @@ describe("polling helpers", () => {
 
   it("repairs archive workflow state when summary preparation fails before returning its workflow id", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const invalidZipBuffer = Buffer.from("not a zip archive", "utf8");
     const updateSpy = vi.spyOn(FileWorkflowStore.prototype, "update");
@@ -2969,6 +2999,7 @@ describe("polling helpers", () => {
 
   it("does not append an archive summary record in processing state before delivery succeeds", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const zipBuffer = createZipBuffer({
       "README.md": "# hello",
@@ -3021,6 +3052,7 @@ describe("polling helpers", () => {
 
   it("renders unreadable file-workflow state during upload as an internal recovery error", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(path.join(root, "file-workflow.json"), "{not valid json", "utf8");
     const api = {
@@ -3069,6 +3101,7 @@ describe("polling helpers", () => {
 
   it("renders unreadable file-workflow state during archive continuation as an internal recovery error", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(path.join(root, "file-workflow.json"), "{not valid json", "utf8");
     const api = {
@@ -3114,6 +3147,7 @@ describe("polling helpers", () => {
 
   it("injects extracted text for supported document uploads", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -3163,6 +3197,7 @@ describe("polling helpers", () => {
 
   it("stages image uploads and forwards explicit image context to the bridge", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -3211,6 +3246,10 @@ describe("polling helpers", () => {
   });
 
   it("shows typing indicator and sends response as new message", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await mkdir(inboxDir, { recursive: true });
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -3224,29 +3263,34 @@ describe("polling helpers", () => {
       handleAuthorizedMessage: vi.fn().mockResolvedValue({ text: "final response" }),
     };
 
-    await handleNormalizedTelegramMessage(
-      {
-        chatId: 123,
-        userId: 456,
-        chatType: "private",
-        text: "hello",
-        replyContext: undefined,
-        attachments: [],
-      },
-      {
-        api: api as never,
-        bridge: bridge as never,
-        inboxDir: path.join(os.tmpdir(), "ignored"),
-      },
-    );
+    try {
+      await handleNormalizedTelegramMessage(
+        {
+          chatId: 123,
+          userId: 456,
+          chatType: "private",
+          text: "hello",
+          replyContext: undefined,
+          attachments: [],
+        },
+        {
+          api: api as never,
+          bridge: bridge as never,
+          inboxDir,
+        },
+      );
 
-    expect(api.sendChatAction).toHaveBeenCalledWith(123);
-    expect(api.sendMessage).toHaveBeenCalledWith(123, "final response", expect.anything());
-    expect(api.editMessage).not.toHaveBeenCalled();
+      expect(api.sendChatAction).toHaveBeenCalledWith(123);
+      expect(api.sendMessage).toHaveBeenCalledWith(123, "final response", expect.anything());
+      expect(api.editMessage).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("uses typing indicator instead of progress edits during engine execution", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -3288,6 +3332,7 @@ describe("polling helpers", () => {
 
   it("resets only the current chat session when /reset is sent", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "session.json"),
@@ -3359,7 +3404,7 @@ describe("polling helpers", () => {
   it("returns a concise status message for /status with blocking tasks called out separately", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const inboxDir = path.join(root, "inbox");
-    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex" }) + "\n", "utf8");
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }) + "\n", "utf8");
     await writeFile(
       path.join(root, "session.json"),
       JSON.stringify({
@@ -3489,6 +3534,7 @@ describe("polling helpers", () => {
 
   it("degrades /status when session and workflow state are unreadable", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(path.join(root, "session.json"), "{not valid json", "utf8");
     await writeFile(path.join(root, "file-workflow.json"), "{not valid json", "utf8");
@@ -3539,6 +3585,7 @@ describe("polling helpers", () => {
 
   it("classifies malformed session state on the normal message path as session-state", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(path.join(root, "session.json"), "{not valid json", "utf8");
     const accessStorePath = path.join(root, "access.json");
@@ -3593,6 +3640,7 @@ describe("polling helpers", () => {
 
   it("reports permission-denied session state without suggesting reset on the normal message path", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await mkdir(inboxDir, { recursive: true });
     const accessStorePath = path.join(root, "access.json");
@@ -3650,6 +3698,7 @@ describe("polling helpers", () => {
 
   it("returns help text for /help", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -3735,6 +3784,7 @@ describe("polling helpers", () => {
 
   it("rejects /context on Codex engine with a clear message", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await mkdir(inboxDir, { recursive: true });
     // No config.json → default engine is codex
@@ -3818,6 +3868,7 @@ describe("polling helpers", () => {
 
   it("rejects /ultrareview on Codex engine", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await mkdir(inboxDir, { recursive: true });
     const api = {
@@ -3858,6 +3909,7 @@ describe("polling helpers", () => {
 
   it("reports no data on /usage when usage.json is absent", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await mkdir(inboxDir, { recursive: true });
     const api = {
@@ -3898,6 +3950,7 @@ describe("polling helpers", () => {
 
   it("renders aggregate usage on /usage when data exists", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await mkdir(inboxDir, { recursive: true });
     await writeFile(
@@ -4107,6 +4160,7 @@ describe("polling helpers", () => {
 
   it("does not reset session state when /reset is denied by access control", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "session.json"),
@@ -4171,6 +4225,7 @@ describe("polling helpers", () => {
 
   it("shows operator guidance when unreadable session state is encountered on /reset", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(path.join(root, "session.json"), "{not valid json", "utf8");
     const api = {
@@ -4217,6 +4272,7 @@ describe("polling helpers", () => {
 
   it("shows operator guidance when /reset hits non-repairable session-state read failures", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const readSpy = vi.spyOn(JsonStore.prototype, "read");
     readSpy.mockRejectedValue(Object.assign(new Error("permission denied"), { code: "EACCES" }));
@@ -4264,6 +4320,7 @@ describe("polling helpers", () => {
 
   it("keeps /reset on explicit session-state guidance when wrapped permission failures lose errno metadata", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const inspectSpy = vi.spyOn(SessionStore.prototype, "inspect");
     inspectSpy.mockResolvedValueOnce({
@@ -4318,6 +4375,7 @@ describe("polling helpers", () => {
 
   it("does not reset session state when /reset is blocked by pairing access control", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     await writeFile(
       path.join(root, "session.json"),
@@ -4497,6 +4555,7 @@ describe("polling helpers", () => {
 
   it("records categorized failures in audit metadata", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const inboxDir = path.join(root, "inbox");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -4536,6 +4595,10 @@ describe("polling helpers", () => {
   });
 
   it("chunks long responses by editing the placeholder with the first chunk and sending the rest", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await mkdir(inboxDir, { recursive: true });
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -4549,28 +4612,36 @@ describe("polling helpers", () => {
       handleAuthorizedMessage: vi.fn().mockResolvedValue({ text: "a".repeat(4500) }),
     };
 
-    await handleNormalizedTelegramMessage(
-      {
-        chatId: 123,
-        userId: 456,
-        chatType: "private",
-        text: "hello",
-        replyContext: undefined,
-        attachments: [],
-      },
-      {
-        api: api as never,
-        bridge: bridge as never,
-        inboxDir: path.join(os.tmpdir(), "ignored"),
-      },
-    );
+    try {
+      await handleNormalizedTelegramMessage(
+        {
+          chatId: 123,
+          userId: 456,
+          chatType: "private",
+          text: "hello",
+          replyContext: undefined,
+          attachments: [],
+        },
+        {
+          api: api as never,
+          bridge: bridge as never,
+          inboxDir,
+        },
+      );
 
-    expect(api.sendMessage).toHaveBeenCalledWith(123, "a".repeat(4000), expect.anything());
-    expect(api.sendMessage).toHaveBeenCalledWith(123, "a".repeat(500), expect.anything());
-    expect(api.sendMessage).toHaveBeenCalledTimes(2);
+      expect(api.sendMessage).toHaveBeenCalledWith(123, "a".repeat(4000), expect.anything());
+      expect(api.sendMessage).toHaveBeenCalledWith(123, "a".repeat(500), expect.anything());
+      expect(api.sendMessage).toHaveBeenCalledTimes(2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("sends a separate error message when a follow-up chunk fails", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await mkdir(inboxDir, { recursive: true });
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const api = {
       sendMessage: vi
         .fn()
@@ -4588,26 +4659,30 @@ describe("polling helpers", () => {
       handleAuthorizedMessage: vi.fn().mockResolvedValue({ text: "a".repeat(4500) }),
     };
 
-    await expect(
-      handleNormalizedTelegramMessage(
-        {
-          chatId: 123,
-          userId: 456,
-          chatType: "private",
-          text: "hello",
-          replyContext: undefined,
-          attachments: [],
-        },
-        {
-          api: api as never,
-          bridge: bridge as never,
-          inboxDir: path.join(os.tmpdir(), "ignored"),
-        },
-      ),
-    ).resolves.toBeUndefined();
+    try {
+      await expect(
+        handleNormalizedTelegramMessage(
+          {
+            chatId: 123,
+            userId: 456,
+            chatType: "private",
+            text: "hello",
+            replyContext: undefined,
+            attachments: [],
+          },
+          {
+            api: api as never,
+            bridge: bridge as never,
+            inboxDir,
+          },
+        ),
+      ).resolves.toBeUndefined();
 
-    expect(api.sendChatAction).toHaveBeenCalledWith(123);
-    expect(api.sendMessage).toHaveBeenCalledTimes(3);
+      expect(api.sendChatAction).toHaveBeenCalledWith(123);
+      expect(api.sendMessage).toHaveBeenCalledTimes(3);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("passes quoted reply context to the bridge", async () => {
@@ -4657,6 +4732,10 @@ describe("polling helpers", () => {
   });
 
   it("sends a document when the model returns a file block", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await mkdir(inboxDir, { recursive: true });
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }), "utf8");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -4673,28 +4752,32 @@ describe("polling helpers", () => {
         .mockResolvedValue({ text: "```file:report.txt\nhello world\n```" }),
     };
 
-    await handleNormalizedTelegramMessage(
-      {
-        chatId: 123,
-        userId: 456,
-        chatType: "private",
-        text: "send file",
-        replyContext: undefined,
-        attachments: [],
-      },
-      {
-        api: api as never,
-        bridge: bridge as never,
-        inboxDir: path.join(os.tmpdir(), "ignored"),
-      },
-    );
-    expect(api.sendDocument).toHaveBeenCalledWith(123, "report.txt", "hello world\n");
+    try {
+      await handleNormalizedTelegramMessage(
+        {
+          chatId: 123,
+          userId: 456,
+          chatType: "private",
+          text: "send file",
+          replyContext: undefined,
+          attachments: [],
+        },
+        {
+          api: api as never,
+          bridge: bridge as never,
+          inboxDir,
+        },
+      );
+      expect(api.sendDocument).toHaveBeenCalledWith(123, "report.txt", "hello world\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("sends files generated into codex telegram-out directories", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const inboxDir = path.join(root, "inbox");
-    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex" }) + "\n", "utf8");
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }) + "\n", "utf8");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
@@ -4751,7 +4834,7 @@ describe("polling helpers", () => {
   it("does not create codex telegram-out directories for ordinary messages", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const inboxDir = path.join(root, "inbox");
-    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex" }) + "\n", "utf8");
+    await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }) + "\n", "utf8");
     const api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
       editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),

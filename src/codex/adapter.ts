@@ -15,11 +15,18 @@ export interface CodexAdapterResponse {
   usage?: AdapterUsage;
 }
 
+import type { ProgressCallback, ProgressState } from "./progress-types.js";
+
+export type { ProgressCallback, ProgressState } from "./progress-types.js";
+
 export interface CodexUserMessageInput {
   text: string;
   files: string[];
   instructions?: string;
+  /** @deprecated Use onProgressState for rich progress updates */
   onProgress?: (partialText: string) => void;
+  /** Rich progress callback with state updates (thinking, tool calls, etc.) */
+  onProgressState?: ProgressCallback;
   requestOutputDir?: string;
   workspaceOverride?: string;
   abortSignal?: AbortSignal;

@@ -24,6 +24,44 @@ import type {
   CodexUserMessageInput,
 } from "./adapter.js";
 import type { ApprovalMode } from "./process-adapter.js";
+import type { ProgressState, ToolCall } from "./progress-types.js";
+
+function shortenPath(filePath: string): string {
+  const parts = filePath.split("/");
+  if (parts.length <= 3) return filePath;
+  return "..." + "/" + parts.slice(-2).join("/");
+}
+
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max) + "...";
+}
+
+function formatToolDetail(name: string, input: unknown): string {
+  if (!input || typeof input !== "object") return "";
+  const inp = input as Record<string, unknown>;
+  switch (name) {
+    case "Read":
+    case "Write":
+    case "Edit":
+    case "MultiEdit":
+      return inp.file_path ? `\`${shortenPath(String(inp.file_path))}\`` : "";
+    case "Bash":
+      return inp.command ? `\`${truncate(String(inp.command), 60)}\`` : "";
+    case "Glob":
+      return inp.pattern ? `\`${String(inp.pattern)}\`` : "";
+    case "Grep":
+      return inp.pattern ? `\`${String(inp.pattern)}\`` : "";
+    case "WebSearch":
+      return inp.query ? `"${truncate(String(inp.query), 50)}"` : "";
+    case "WebFetch":
+      return inp.url ? `\`${truncate(String(inp.url), 60)}\`` : "";
+    case "Task":
+      return inp.description ? String(inp.description) : "";
+    default:
+      return "";
+  }
+}
 
 type SpawnOptions = {
   stdio: ["pipe", "pipe", "pipe"];
@@ -53,6 +91,15 @@ type ClaudeChildProcess = {
 
 type SpawnClaude = (command: string, args: string[], options: SpawnOptions) => ClaudeChildProcess;
 
+type ContentBlock = {
+  type?: string;
+  text?: string;
+  name?: string;
+  input?: unknown;
+  id?: string;
+  thinking?: string;
+};
+
 type ClaudeStreamEvent = {
   type?: string;
   subtype?: string;
@@ -60,18 +107,27 @@ type ClaudeStreamEvent = {
   result?: string;
   is_error?: boolean;
   message?: {
-    content?: Array<{
-      type?: string;
-      text?: string;
-    }>;
+    content?: ContentBlock[];
   };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+  total_cost_usd?: number;
 };
 
 type PendingTurn = {
   assistantText: string;
+  userPrompt: string;
   resolve: (value: CodexAdapterResponse) => void;
   reject: (error: Error) => void;
   timeout?: ReturnType<typeof setTimeout>;
+  onProgressState?: (state: ProgressState) => void;
+  /** Tracked turn progress state for streaming updates */
+  progressState: ProgressState;
+  /** Start time of the turn, used to compute durationMs */
+  startTime: number;
 };
 
 type ClaudeWorker = {
@@ -231,7 +287,7 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     const prompt = this.buildPrompt(input);
     const worker = this.getOrCreateWorker(sessionId, agentInstructions, bridgeInstructions, approvalMode, engineOptions);
 
-    const response = await this.sendTurn(worker, prompt, input.abortSignal);
+    const response = await this.sendTurn(worker, prompt, input.onProgressState, input.abortSignal);
     const nextSessionId = response.sessionId;
     if (nextSessionId && nextSessionId !== sessionId) {
       this.workers.delete(sessionId);
@@ -365,14 +421,56 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     }
 
     if (parsed.type === "assistant" && worker.pendingTurn) {
-      const text =
-        parsed.message?.content
-          ?.filter((item) => item.type === "text" && typeof item.text === "string")
-          .map((item) => item.text ?? "")
-          .join("") ?? "";
-      if (text) {
-        worker.pendingTurn.assistantText = text;
+      const pending = worker.pendingTurn;
+
+      // A new assistant message means previous tools have completed
+      for (const tc of pending.progressState.toolCalls) {
+        if (tc.status === "running") tc.status = "done";
       }
+
+      const content = parsed.message?.content ?? [];
+
+      let text = "";
+      let thinking = "";
+      const newToolCalls: ToolCall[] = [];
+
+      for (const item of content) {
+        if (item.type === "text" && typeof item.text === "string") {
+          text += item.text;
+        } else if (item.type === "thinking" && typeof item.thinking === "string") {
+          thinking += item.thinking;
+        } else if (item.type === "tool_use" && item.name) {
+          newToolCalls.push({
+            name: item.name,
+            detail: formatToolDetail(item.name, item.input),
+            status: "running",
+          });
+        }
+      }
+
+      if (text) {
+        pending.assistantText = text;
+      }
+
+      // Update progress state
+      const progressState = pending.progressState;
+      progressState.responseText = pending.assistantText;
+
+      // Determine status based on content
+      if (newToolCalls.length > 0) {
+        progressState.status = "running";
+        for (const newCall of newToolCalls) {
+          progressState.toolCalls.push(newCall);
+        }
+      } else if (thinking && !text) {
+        progressState.status = "thinking";
+      }
+
+      // Emit progress update
+      if (pending.onProgressState) {
+        pending.onProgressState({ ...progressState });
+      }
+
       return;
     }
 
@@ -380,6 +478,37 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       const pending = worker.pendingTurn;
       worker.pendingTurn = null;
       this.clearPendingTurnTimeout(pending);
+
+      const progressState = pending.progressState;
+
+      // Mark all tool calls as done
+      progressState.toolCalls.forEach((tc) => {
+        tc.status = "done";
+      });
+      progressState.status = parsed.is_error ? "error" : "complete";
+      progressState.responseText = (parsed.result ?? pending.assistantText ?? "").trim();
+      progressState.durationMs = Date.now() - pending.startTime;
+      if (parsed.is_error) {
+        progressState.errorMessage = progressState.responseText || "Claude reported an error";
+      }
+
+      // Extract usage data from result event
+      const usage = parsed.usage ? {
+        inputTokens: parsed.usage.input_tokens ?? 0,
+        outputTokens: parsed.usage.output_tokens ?? 0,
+        cachedTokens: parsed.usage.cache_read_input_tokens ?? 0,
+        costUsd: parsed.total_cost_usd ?? undefined,
+      } : undefined;
+
+      if (usage) {
+        progressState.usage = usage;
+      }
+
+      // Single final progress emit (usage + status in one call)
+      if (pending.onProgressState) {
+        pending.onProgressState({ ...progressState });
+      }
+
       if (parsed.is_error) {
         pending.reject(new Error((parsed.result ?? pending.assistantText ?? "Claude reported an error").trim()));
         return;
@@ -387,11 +516,17 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       pending.resolve({
         text: (parsed.result ?? pending.assistantText ?? "").trim() || "Claude completed the request.",
         sessionId: worker.currentSessionId ?? undefined,
+        usage,
       });
     }
   }
 
-  private async sendTurn(worker: ClaudeWorker, prompt: string, abortSignal?: AbortSignal): Promise<CodexAdapterResponse> {
+  private async sendTurn(
+    worker: ClaudeWorker,
+    prompt: string,
+    onProgressState?: (state: ProgressState) => void,
+    abortSignal?: AbortSignal,
+  ): Promise<CodexAdapterResponse> {
     if (worker.pendingTurn) {
       throw new Error("Claude session already has an in-flight turn");
     }
@@ -399,8 +534,17 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     return await new Promise<CodexAdapterResponse>((resolve, reject) => {
       const pendingTurn: PendingTurn = {
         assistantText: "",
+        userPrompt: prompt,
         resolve,
         reject,
+        onProgressState,
+        startTime: Date.now(),
+        progressState: {
+          status: "thinking",
+          userPrompt: prompt,
+          responseText: "",
+          toolCalls: [],
+        },
       };
       worker.pendingTurn = pendingTurn;
 

@@ -105,6 +105,8 @@ type ClaudeStreamEvent = {
   subtype?: string;
   session_id?: string;
   timestamp?: string;
+  hook_name?: string;
+  hook_event?: string;
   result?: string;
   is_error?: boolean;
   message?: {
@@ -338,7 +340,7 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       sessionId = resumedSessionId;
     }
 
-    const args = ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json"];
+    const args = ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--include-hook-events"];
     if (agentInstructions) {
       args.push("--system-prompt", agentInstructions);
     }
@@ -437,6 +439,7 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     // Handle system events
     if (parsed.type === "system") {
       if (parsed.subtype === "compact_boundary") {
+        // Fallback: compact_boundary is currently transcript-only, but handle it if ever emitted
         const timestamp = parsed.timestamp ?? new Date().toISOString();
         if (worker.lastCompactionTimestamp === timestamp) {
           console.debug(`[ClaudeStreamAdapter] Duplicate compaction event skipped: ${timestamp}`);
@@ -445,16 +448,42 @@ export class ClaudeStreamAdapter implements CodexAdapter {
         worker.lastCompactionTimestamp = timestamp;
         const date = new Date(timestamp);
         if (isNaN(date.getTime())) {
-          console.warn("[ClaudeStreamAdapter] Invalid compaction timestamp:", timestamp);
+          console.info("[ClaudeStreamAdapter] Invalid compaction timestamp:", timestamp);
           return;
         }
         const localTime = date.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
         const notice = `🪦 对话上下文已压缩（${localTime}）。早期对话内容可能丢失。`;
-        console.warn(`[ClaudeStreamAdapter] Compaction detected: ${timestamp}`);
+        console.info(`[ClaudeStreamAdapter] Compaction detected via compact_boundary: ${timestamp}`);
         if (worker.onAsyncMessage) {
           Promise.resolve(worker.onAsyncMessage(notice)).catch(err => {
             console.error("[ClaudeStreamAdapter] Compaction notice delivery failed:", err);
           });
+        }
+      } else if (parsed.subtype === "hook_started" && parsed.hook_event) {
+        // Detect compaction via PreCompact/PostCompact hook events
+        const hookEvent = parsed.hook_event;
+        if (hookEvent === "PreCompact" || hookEvent === "PostCompact") {
+          const timestamp = parsed.timestamp ?? new Date().toISOString();
+          // Deduplicate: use hook_event as key to avoid double-notify for PreCompact+PostCompact
+          const dedupKey = `${timestamp.slice(0, 19)}-${hookEvent}`;
+          if (worker.lastCompactionTimestamp === dedupKey) {
+            console.debug(`[ClaudeStreamAdapter] Duplicate compaction hook skipped: ${hookEvent}`);
+            return;
+          }
+          worker.lastCompactionTimestamp = dedupKey;
+          // Only notify on PostCompact (compaction is confirmed done)
+          if (hookEvent === "PostCompact") {
+            const localTime = new Date(timestamp).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
+            const notice = `🪦 对话上下文已压缩（${localTime}）。早期对话内容可能丢失。`;
+            console.info(`[ClaudeStreamAdapter] Compaction detected via ${hookEvent} hook`);
+            if (worker.onAsyncMessage) {
+              Promise.resolve(worker.onAsyncMessage(notice)).catch(err => {
+                console.error("[ClaudeStreamAdapter] Compaction notice delivery failed:", err);
+              });
+            }
+          }
+        } else {
+          console.debug(`[ClaudeStreamAdapter] Hook started: ${parsed.hook_name ?? hookEvent}`);
         }
       } else {
         console.debug(`[ClaudeStreamAdapter] System event: ${parsed.subtype ?? "unknown"}`, JSON.stringify(parsed).slice(0, 200));

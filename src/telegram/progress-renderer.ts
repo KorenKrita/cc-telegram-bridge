@@ -355,8 +355,9 @@ export function shouldUpdateDisplay(prev: ProgressState | null, current: Progres
  * 1 = 2 second interval
  * 2 = 1 second interval
  */
-export function getUpdateIntervalMs(verbosity: 0 | 1 | 2): number | null {
-  switch (verbosity) {
+export function getUpdateIntervalMs(verbosity: 0 | 1 | 2 | undefined): number | null {
+  const v = verbosity ?? 0;
+  switch (v) {
     case 0:
       return null; // No streaming
     case 1:

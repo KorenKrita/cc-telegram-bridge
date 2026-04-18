@@ -927,6 +927,7 @@ export async function pollTelegramUpdatesOnce(
   logger: Pick<Console, "error"> = console,
   offset?: number,
   signal?: AbortSignal,
+  instanceName?: string,
 ): Promise<{ offset: number | undefined; hadFetchError: boolean; hadUpdates: boolean; conflict: boolean }> {
   try {
     const updates = await api.getUpdates(offset, signal);
@@ -935,7 +936,7 @@ export async function pollTelegramUpdatesOnce(
     // Offset is NOT advanced here — processTelegramUpdates marks handled
     // updates in the runtime state store, and we read back the last handled
     // ID for the next poll to avoid message loss on crash.
-    void processTelegramUpdates(updates, { api, bridge, inboxDir }, logger).catch((error) => {
+    void processTelegramUpdates(updates, { api, bridge, inboxDir, instanceName }, logger).catch((error) => {
       logger.error(formatErrorMessage("Background update processing failed", error));
     });
     const lastHandled = await getLastHandledUpdateId(inboxDir);
@@ -983,6 +984,7 @@ export async function pollTelegramUpdates(
   inboxDir: string,
   logger: Pick<Console, "error"> = console,
   signal?: AbortSignal,
+  instanceName?: string,
 ): Promise<void> {
   let offset: number | undefined;
   let backoffMs = 1000;
@@ -990,7 +992,7 @@ export async function pollTelegramUpdates(
 
   while (!signal?.aborted) {
     const previousOffset = offset;
-    const result = await pollTelegramUpdatesOnce(api, bridge, inboxDir, logger, offset, signal);
+    const result = await pollTelegramUpdatesOnce(api, bridge, inboxDir, logger, offset, signal, instanceName);
     offset = result.offset;
 
     if (result.conflict) {

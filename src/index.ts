@@ -78,7 +78,7 @@ async function main(): Promise<void> {
     }
 
     try {
-      await pollTelegramUpdates(api, bridge, config.inboxDir, console, abortController.signal);
+      await pollTelegramUpdates(api, bridge, config.inboxDir, console, abortController.signal, instanceName);
     } finally {
       if (busServer) {
         await stopBusServer(busServer);

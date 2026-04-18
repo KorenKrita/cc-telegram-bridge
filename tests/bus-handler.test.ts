@@ -109,6 +109,8 @@ describe("createBusTalkHandler", () => {
         totalInputTokens: 10,
         totalOutputTokens: 5,
         totalCachedTokens: 0,
+        totalCacheReadTokens: 0,
+        totalCacheCreationTokens: 0,
         totalCostUsd: 0.75,
         requestCount: 2,
         lastUpdatedAt: "2026-04-17T00:00:00.000Z",

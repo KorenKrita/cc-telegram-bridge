@@ -86,6 +86,8 @@ export async function recordBridgeTurnUsage(
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     cachedTokens: usage.cachedTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
     costUsd: usage.costUsd,
   });
 

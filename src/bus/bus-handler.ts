@@ -73,6 +73,9 @@ export function createBusTalkHandler(input: {
     }
 
     try {
+      // Bus handler does not use progress callbacks (onProgressState) or async
+      // message handler (onAsyncMessage) by design: bus turns are fire-and-forget
+      // request/response cycles where the caller expects a single complete response.
       const result = await input.bridge.handleAuthorizedMessage({
         chatId: busChatId,
         userId: 0,
@@ -140,6 +143,7 @@ export function createBusTalkHandler(input: {
         text: result.text,
         fromInstance: input.instanceName,
         durationMs: Date.now() - startedAt,
+        usage: result.usage,
       });
     } catch (error) {
       const failureCategory = classifyFailure(error);

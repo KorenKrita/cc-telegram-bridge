@@ -73,6 +73,7 @@ interface ClaudeJsonResult {
     input_tokens?: number;
     output_tokens?: number;
     cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
   };
 }
 
@@ -291,7 +292,7 @@ export class ProcessClaudeAdapter implements CodexAdapter {
     };
   }
 
-  private parseResult(stdout: string): { text: string; sessionId?: string; usage?: { inputTokens: number; outputTokens: number; cachedTokens?: number; costUsd?: number } } {
+  private parseResult(stdout: string): { text: string; sessionId?: string; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; cachedTokens?: number; costUsd?: number } } {
     const trimmed = stdout.trim();
     if (!trimmed) {
       return { text: "Claude returned an empty response." };
@@ -350,6 +351,8 @@ export class ProcessClaudeAdapter implements CodexAdapter {
         inputTokens: json.usage.input_tokens ?? 0,
         outputTokens: json.usage.output_tokens ?? 0,
         cachedTokens: json.usage.cache_read_input_tokens ?? 0,
+        cacheReadTokens: json.usage.cache_read_input_tokens ?? 0,
+        cacheCreationTokens: json.usage.cache_creation_input_tokens ?? 0,
         costUsd: json.total_cost_usd ?? undefined,
       } : undefined;
 

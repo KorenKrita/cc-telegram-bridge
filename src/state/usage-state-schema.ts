@@ -13,7 +13,10 @@ const UsageTimestampSchema = z.union([
 export const UsageRecordSchema = z.object({
   totalInputTokens: z.number().int().nonnegative(),
   totalOutputTokens: z.number().int().nonnegative(),
+  /** @deprecated Use totalCacheReadTokens instead */
   totalCachedTokens: z.number().int().nonnegative(),
+  totalCacheReadTokens: z.number().int().nonnegative().optional().default(0),
+  totalCacheCreationTokens: z.number().int().nonnegative().optional().default(0),
   totalCostUsd: z.number().nonnegative(),
   requestCount: z.number().int().nonnegative(),
   lastUpdatedAt: UsageTimestampSchema,

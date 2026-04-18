@@ -17,8 +17,10 @@ import {
 import type { FileWorkflowStore } from "../state/file-workflow-store.js";
 import { appendUpdateHandleAuditEventBestEffort, maybeReplyWithBudgetExhausted, recordTurnUsageAndBudgetAudit } from "./turn-bookkeeping.js";
 import { chunkTelegramMessage, type Locale } from "./message-renderer.js";
+import { renderProgressHtml, shouldUpdateDisplay, getUpdateIntervalMs } from "./progress-renderer.js";
 import type { InlineKeyboardButton, TelegramApi } from "./api.js";
 import type { NormalizedTelegramMessage } from "./update-normalizer.js";
+import type { ProgressState } from "../codex/progress-types.js";
 
 export interface WorkflowAwareTurnState {
   workflowRecordId?: string;
@@ -36,7 +38,7 @@ export interface WorkflowAwareTurnConfig {
 }
 
 export interface WorkflowAwareTurnContext {
-  api: Pick<TelegramApi, "sendMessage" | "getFile" | "downloadFile">;
+  api: Pick<TelegramApi, "sendMessage" | "getFile" | "downloadFile" | "editMessage">;
   bridge: {
     handleAuthorizedMessage(input: {
       chatId: number;
@@ -49,12 +51,16 @@ export interface WorkflowAwareTurnContext {
       requestOutputDir?: string;
       workspaceOverride?: string;
       abortSignal?: AbortSignal;
+      onProgressState?: (state: ProgressState) => void;
+      onAsyncMessage?: (text: string) => void | Promise<void>;
     }): Promise<{
       text: string;
       usage?: {
         inputTokens: number;
         outputTokens: number;
         cachedTokens?: number;
+        cacheReadTokens?: number;
+        cacheCreationTokens?: number;
         costUsd?: number;
       };
     }>;
@@ -63,6 +69,7 @@ export interface WorkflowAwareTurnContext {
   abortSignal?: AbortSignal;
   instanceName?: string;
   updateId?: number;
+  verbosity?: number;
 }
 
 function wantsTelegramOut(text: string): boolean {
@@ -250,6 +257,110 @@ export async function executeWorkflowAwareTelegramTurn(input: {
     }
   }
 
+  // Handle verbosity-based streaming: 0=no streaming, 1=2s interval, 2=1s interval
+  const updateIntervalMs = getUpdateIntervalMs((context.verbosity ?? 0) as 0 | 1 | 2);
+  let progressMessageId: number | undefined;
+  let lastProgressState: ProgressState | null = null;
+  let sentProgressState: ProgressState | null = null;
+  let progressTimerId: ReturnType<typeof setInterval> | undefined;
+  let firstTickTimeout: ReturnType<typeof setTimeout> | undefined;
+  let progressUpdateInFlight = false;
+
+  // Send or edit the progress message (internal — called only by the timer)
+  const sendOrEditProgress = async (ps: ProgressState): Promise<void> => {
+    const html = renderProgressHtml(ps);
+    if (!progressMessageId) {
+      try {
+        const msg = await context.api.sendMessage(normalized.chatId, html, { parseMode: "HTML" });
+        progressMessageId = msg.message_id;
+      } catch (err: unknown) {
+        // Fallback to plain text
+        try {
+          const fallbackText = ps.status === "thinking" ? "🔵 Thinking..." : "⏳ Running...";
+          const msg = await context.api.sendMessage(normalized.chatId, fallbackText);
+          progressMessageId = msg.message_id;
+        } catch {
+          // Both HTML and fallback failed — nothing more we can do
+        }
+      }
+    } else {
+      try {
+        await context.api.editMessage(normalized.chatId, progressMessageId, html, { parseMode: "HTML" });
+      } catch (err: unknown) {
+        const desc = (err as { description?: string })?.description ?? "";
+        // "message is not modified" — content unchanged, harmless
+        if (desc.includes("message is not modified")) return;
+        // Message was deleted — next cycle will send a new one
+        if (desc.includes("message to edit not found")) {
+          progressMessageId = undefined;
+          return;
+        }
+        // Can't parse message text (bad HTML) — fall back to plain text edit
+        if (desc.includes("can't parse")) {
+          const fallbackText = ps.status === "complete" ? "✅ Complete" : ps.status === "error" ? "❌ Error" : "⏳ Running...";
+          await context.api.editMessage(normalized.chatId, progressMessageId, fallbackText).catch(() => {});
+          return;
+        }
+        // Other errors (rate limit, etc.) — ignore, next tick will retry
+      }
+    }
+  };
+
+  // Timer-driven progress send with mutex guard to avoid concurrent API calls
+  const tickProgress = async (): Promise<void> => {
+    if (progressUpdateInFlight) return;
+    if (!lastProgressState || !shouldUpdateDisplay(sentProgressState, lastProgressState)) return;
+    progressUpdateInFlight = true;
+    sentProgressState = { ...lastProgressState };
+    try {
+      await sendOrEditProgress(sentProgressState);
+    } finally {
+      progressUpdateInFlight = false;
+    }
+  };
+
+  // Flush: cancel timer and send the latest state immediately
+  const flushProgress = async (): Promise<void> => {
+    if (progressTimerId) { clearInterval(progressTimerId); progressTimerId = undefined; }
+    if (firstTickTimeout) { clearTimeout(firstTickTimeout); firstTickTimeout = undefined; }
+    if (lastProgressState && !sentProgressState) {
+      await sendOrEditProgress(lastProgressState);
+    }
+  };
+
+  // onProgressState callback saves state. When the engine signals completion,
+  // immediately update the progress card.
+  const onProgress = (ps: ProgressState): void => {
+    lastProgressState = { ...ps };
+    if (ps.status === "complete" || ps.status === "error") {
+      // Cancel all timers — no more ticks needed
+      if (progressTimerId) { clearInterval(progressTimerId); progressTimerId = undefined; }
+      if (firstTickTimeout) { clearTimeout(firstTickTimeout); firstTickTimeout = undefined; }
+      // Immediately edit the progress card to show the final state.
+      sentProgressState = { ...ps };
+      progressUpdateInFlight = true;
+      sendOrEditProgress(ps).finally(() => { progressUpdateInFlight = false; });
+    }
+  };
+
+  if (updateIntervalMs !== null) {
+    // First tick fires quickly (200ms) to show "Thinking..." without delay
+    firstTickTimeout = setTimeout(() => void tickProgress(), 200);
+    progressTimerId = setInterval(() => void tickProgress(), updateIntervalMs);
+  }
+
+  // Handle async messages (e.g., task notifications from background tasks)
+  const onAsyncMessage = async (text: string): Promise<void> => {
+    await deliverTelegramResponse(
+      context.api,
+      normalized.chatId,
+      text,
+      context.inboxDir,
+      cfg.resume?.workspacePath,
+      locale,
+    );
+  };
+
   const result = await context.bridge.handleAuthorizedMessage({
     chatId: normalized.chatId,
     userId: normalized.userId,
@@ -261,18 +372,43 @@ export async function executeWorkflowAwareTelegramTurn(input: {
     requestOutputDir: state.telegramOutDirPath,
     workspaceOverride: cfg.resume?.workspacePath,
     abortSignal: context.abortSignal,
+    onProgressState: updateIntervalMs !== null ? onProgress : undefined,
+    onAsyncMessage,
   });
+
+  // Flush the final progress state (adapter already emitted a complete state).
+  if (updateIntervalMs !== null) {
+    await flushProgress();
+  }
 
   await recordTurnUsageAndBudgetAudit(stateDir, cfg.budgetUsd, context, normalized, result.usage);
 
-  await deliverTelegramResponse(
-    context.api,
-    normalized.chatId,
-    result.text,
-    context.inboxDir,
-    cfg.resume?.workspacePath,
-    locale,
-  );
+  // Decide whether to send a separate full-text message after the progress card.
+  // In streaming mode, the progress card already displays the final complete text
+  // via editMessage. Only send a separate delivery when:
+  //   - Non-streaming (no progress card was ever sent)
+  //   - Response has file blocks that need extraction ([send-file:] tags, ```file: blocks)
+  //   - Response is long enough that the progress card truncated it (4096-char limit)
+  const hasFileBlocks = /```file:\S+\n/.test(result.text);
+  const hasFileTags = /\[send-file:[^\]]+\]/.test(result.text);
+  const needsFileDelivery = hasFileBlocks || hasFileTags;
+  // The progress card includes header/tool-call stats which add ~200 chars overhead,
+  // plus markdownToTelegramHtml expansion. Use 3200 as a safe threshold to detect
+  // responses that would be truncated in the progress card.
+  const likelyTruncated = result.text.length > 3200;
+  if (updateIntervalMs === null || needsFileDelivery || likelyTruncated) {
+    // Non-streaming: always use full delivery
+    // Streaming + files: need deliverTelegramResponse to extract and send attachments
+    // Streaming + long text: progress card truncated; send full chunked version
+    await deliverTelegramResponse(
+      context.api,
+      normalized.chatId,
+      result.text,
+      context.inboxDir,
+      cfg.resume?.workspacePath,
+      locale,
+    );
+  }
 
   if (state.telegramOutDirPath) {
     const describedFiles = await describeTelegramOutFiles(state.telegramOutDirPath);

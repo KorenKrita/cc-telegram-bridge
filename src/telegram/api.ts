@@ -291,23 +291,25 @@ export class TelegramApi {
     text: string,
     options?: TelegramMessageOptions,
   ): Promise<TelegramMessage> {
-    return this.postJson("editMessageText", {
+    const body: Record<string, unknown> = {
       chat_id: chatId,
       message_id: messageId,
       text,
-      ...(options?.inlineKeyboard
-        ? {
-            reply_markup: {
-              inline_keyboard: options.inlineKeyboard.map((row) =>
-                row.map((button) => ({
-                  text: button.text,
-                  callback_data: button.callbackData,
-                })),
-              ),
-            },
-          }
-        : {}),
-    }, isTelegramMessage);
+    };
+    if (options?.parseMode) {
+      body.parse_mode = options.parseMode;
+    }
+    if (options?.inlineKeyboard) {
+      body.reply_markup = {
+        inline_keyboard: options.inlineKeyboard.map((row) =>
+          row.map((button) => ({
+            text: button.text,
+            callback_data: button.callbackData,
+          })),
+        ),
+      };
+    }
+    return this.postJson("editMessageText", body, isTelegramMessage);
   }
 
   async answerCallbackQuery(callbackQueryId: string): Promise<void> {

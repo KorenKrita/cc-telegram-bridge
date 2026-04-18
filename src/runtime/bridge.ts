@@ -1,4 +1,4 @@
-import type { CodexAdapter } from "../codex/adapter.js";
+import type { CodexAdapter, ProgressCallback } from "../codex/adapter.js";
 import {
   type Locale,
   renderPairingMessage,
@@ -169,6 +169,8 @@ export class Bridge {
     };
     files: string[];
     onProgress?: (partialText: string) => void;
+    onProgressState?: ProgressCallback;
+    onAsyncMessage?: (text: string) => void;
     requestOutputDir?: string;
     workspaceOverride?: string;
     abortSignal?: AbortSignal;
@@ -199,6 +201,8 @@ export class Bridge {
       files: input.files,
       instructions,
       onProgress: input.onProgress,
+      onProgressState: input.onProgressState,
+      onAsyncMessage: input.onAsyncMessage,
       requestOutputDir: input.requestOutputDir,
       workspaceOverride: input.workspaceOverride,
       abortSignal: input.abortSignal,

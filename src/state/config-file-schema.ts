@@ -18,6 +18,7 @@ export const ConfigFileSchema = z.object({
   model: z.string().optional(),
   resume: ResumeStateFileSchema.optional(),
   bus: z.unknown().optional(),
+  groupChatIds: z.array(z.number()).optional(),
 }).passthrough();
 
 export type ConfigFile = z.infer<typeof ConfigFileSchema>;

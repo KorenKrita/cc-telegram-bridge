@@ -12,6 +12,10 @@ import { loadBusConfig } from "./bus/bus-config.js";
 import { createBusServer, startBusServer, stopBusServer } from "./bus/bus-server.js";
 import { createBusTalkHandler } from "./bus/bus-handler.js";
 import { pruneStaleInstances, registerInstance, deregisterInstance, resolveChannelRoot } from "./bus/bus-registry.js";
+import { UsageStore } from "./state/usage-store.js";
+import { GroupHandler } from "./telegram/group-handler.js";
+import { loadInstanceConfig } from "./telegram/instance-config.js";
+import type { GroupMessageInput } from "./telegram/types.js";
 
 async function main(): Promise<void> {
   try {
@@ -76,9 +80,80 @@ async function main(): Promise<void> {
       console.log(`Bus server listening on 127.0.0.1:${boundPort}`);
     }
 
+    // Load instance config to get allowed group chat IDs
+    const instanceConfig = await loadInstanceConfig(config.stateDir);
+    const allowedChatIds = instanceConfig.groupChatIds ?? [];
+
+    // Start group handler if allowed chat IDs are configured
+    let groupHandler: GroupHandler | null = null;
+    if (allowedChatIds.length > 0) {
+      groupHandler = new GroupHandler({
+        botToken: config.telegramBotToken,
+        allowedChatIds,
+        onMessage: async (input: GroupMessageInput) => {
+          console.log(`[GroupHandler] onMessage triggered: chatId=${input.chatId}, messageId=${input.messageId}, isMentioned=${input.routing.isMentioned}, isReply=${input.routing.isReply}`);
+
+          // Send typing indicator
+          try {
+            await api.sendChatAction(input.chatId, "typing");
+            console.log(`[GroupHandler] Typing indicator sent to chat ${input.chatId}`);
+          } catch (typingErr) {
+            console.warn(`[GroupHandler] Failed to send typing indicator:`, typingErr);
+          }
+
+          let response;
+          try {
+            console.log(`[GroupHandler] Calling bridge.handleGroupMessage for chat ${input.chatId}...`);
+            response = await bridge.handleGroupMessage({
+              ...input,
+              onProgress: (partialText: string) => {
+                console.log(`[GroupHandler] Progress: ${partialText.slice(0, 50)}...`);
+              },
+              onAsyncMessage: (text: string) => {
+                console.log(`[GroupHandler] Async message: ${text.slice(0, 100)}...`);
+                // Send async messages (like compaction notices) immediately
+                api.sendMessage(input.chatId, text).catch((err) => {
+                  console.error(`[GroupHandler] Failed to send async message:`, err);
+                });
+              },
+            });
+            console.log(`[GroupHandler] bridge.handleGroupMessage completed, response length: ${response.text.length}`);
+          } catch (err) {
+            console.error(`[GroupHandler] bridge.handleGroupMessage failed:`, err);
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            try {
+              await api.sendMessage(input.chatId, `❌ 处理失败: ${errorMessage}`);
+            } catch (sendErr) {
+              console.error(`[GroupHandler] Failed to send error message:`, sendErr);
+            }
+            return;
+          }
+
+          // Send the response back to the group chat
+          try {
+            console.log(`[GroupHandler] Sending response to chat ${input.chatId}, text length: ${response.text.length}`);
+            await api.sendMessage(input.chatId, response.text);
+            console.log(`[GroupHandler] Response sent successfully to chat ${input.chatId}`);
+
+            if (response.usage) {
+              console.log(`[GroupHandler] Usage: inputTokens=${response.usage.inputTokens}, outputTokens=${response.usage.outputTokens}`);
+            }
+          } catch (sendErr) {
+            console.error(`[GroupHandler] Failed to send response:`, sendErr);
+          }
+        },
+      });
+      await groupHandler.start();
+    } else {
+      console.log("[Main] groupChatIds not configured in config.json, group handler disabled");
+    }
+
     try {
-      await pollTelegramUpdates(api, bridge, config.inboxDir, console, abortController.signal);
+      await pollTelegramUpdates(api, bridge, config.inboxDir, console, abortController.signal, instanceName, groupHandler ?? undefined);
     } finally {
+      if (groupHandler) {
+        await groupHandler.stop();
+      }
       if (busServer) {
         await stopBusServer(busServer);
         await deregisterInstance(channelRoot, instanceName);

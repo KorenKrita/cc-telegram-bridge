@@ -33,6 +33,8 @@ describe("UsageStore", () => {
         totalInputTokens: 0,
         totalOutputTokens: 0,
         totalCachedTokens: 0,
+        totalCacheReadTokens: 0,
+        totalCacheCreationTokens: 0,
         totalCostUsd: 0,
         requestCount: 0,
         lastUpdatedAt: "",

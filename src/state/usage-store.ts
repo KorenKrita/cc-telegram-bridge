@@ -7,7 +7,10 @@ import { UsageRecordSchema } from "./usage-state-schema.js";
 export interface UsageRecord {
   totalInputTokens: number;
   totalOutputTokens: number;
+  /** @deprecated Use totalCacheReadTokens instead */
   totalCachedTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheCreationTokens: number;
   totalCostUsd: number;
   requestCount: number;
   lastUpdatedAt: string;
@@ -17,6 +20,8 @@ const defaultUsage: UsageRecord = {
   totalInputTokens: 0,
   totalOutputTokens: 0,
   totalCachedTokens: 0,
+  totalCacheReadTokens: 0,
+  totalCacheCreationTokens: 0,
   totalCostUsd: 0,
   requestCount: 0,
   lastUpdatedAt: "",
@@ -25,7 +30,10 @@ const defaultUsage: UsageRecord = {
 export interface TurnUsage {
   inputTokens: number;
   outputTokens: number;
+  /** @deprecated Use cacheReadTokens instead */
   cachedTokens?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
   costUsd?: number;
 }
 
@@ -57,6 +65,8 @@ export class UsageStore {
         current.totalInputTokens += turn.inputTokens;
         current.totalOutputTokens += turn.outputTokens;
         current.totalCachedTokens += turn.cachedTokens ?? 0;
+        current.totalCacheReadTokens += turn.cacheReadTokens ?? 0;
+        current.totalCacheCreationTokens += turn.cacheCreationTokens ?? 0;
         current.totalCostUsd = Number((current.totalCostUsd + (turn.costUsd ?? 0)).toFixed(12));
         current.requestCount += 1;
         current.lastUpdatedAt = new Date().toISOString();

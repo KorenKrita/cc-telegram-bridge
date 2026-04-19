@@ -140,13 +140,14 @@ function extractLastTurnFailureMessage(events: CodexJsonEvent[]): string | null 
   return lastMessage;
 }
 
-function extractUsage(events: CodexJsonEvent[]): { inputTokens: number; outputTokens: number; cachedTokens: number } | null {
+function extractUsage(events: CodexJsonEvent[]): { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number } | null {
   for (const event of events) {
     if (event.type === "turn.completed" && event.usage) {
       return {
         inputTokens: event.usage.input_tokens ?? 0,
         outputTokens: event.usage.output_tokens ?? 0,
-        cachedTokens: event.usage.cached_input_tokens ?? 0,
+        cacheReadTokens: event.usage.cached_input_tokens ?? 0,
+        cacheCreationTokens: 0, // Codex CLI doesn't expose cache creation tokens
       };
     }
   }

@@ -24,6 +24,44 @@ import type {
   CodexUserMessageInput,
 } from "./adapter.js";
 import type { ApprovalMode } from "./process-adapter.js";
+import type { ProgressState, ToolCall } from "./progress-types.js";
+
+function shortenPath(filePath: string): string {
+  const parts = filePath.split("/");
+  if (parts.length <= 3) return filePath;
+  return "..." + "/" + parts.slice(-2).join("/");
+}
+
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max) + "...";
+}
+
+function formatToolDetail(name: string, input: unknown): string {
+  if (!input || typeof input !== "object") return "";
+  const inp = input as Record<string, unknown>;
+  switch (name) {
+    case "Read":
+    case "Write":
+    case "Edit":
+    case "MultiEdit":
+      return inp.file_path ? `\`${shortenPath(String(inp.file_path))}\`` : "";
+    case "Bash":
+      return inp.command ? `\`${truncate(String(inp.command), 60)}\`` : "";
+    case "Glob":
+      return inp.pattern ? `\`${String(inp.pattern)}\`` : "";
+    case "Grep":
+      return inp.pattern ? `\`${String(inp.pattern)}\`` : "";
+    case "WebSearch":
+      return inp.query ? `"${truncate(String(inp.query), 50)}"` : "";
+    case "WebFetch":
+      return inp.url ? `\`${truncate(String(inp.url), 60)}\`` : "";
+    case "Task":
+      return inp.description ? String(inp.description) : "";
+    default:
+      return "";
+  }
+}
 
 type SpawnOptions = {
   stdio: ["pipe", "pipe", "pipe"];
@@ -53,26 +91,50 @@ type ClaudeChildProcess = {
 
 type SpawnClaude = (command: string, args: string[], options: SpawnOptions) => ClaudeChildProcess;
 
+type ContentBlock = {
+  type?: string;
+  text?: string;
+  name?: string;
+  input?: unknown;
+  id?: string;
+  thinking?: string;
+};
+
 type ClaudeStreamEvent = {
   type?: string;
   subtype?: string;
   session_id?: string;
+  timestamp?: string;
+  hook_name?: string;
+  hook_event?: string;
   result?: string;
   is_error?: boolean;
   message?: {
-    content?: Array<{
-      type?: string;
-      text?: string;
-    }>;
+    content?: ContentBlock[];
   };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+  };
+  total_cost_usd?: number;
 };
 
 type PendingTurn = {
   assistantText: string;
+  userPrompt: string;
   resolve: (value: CodexAdapterResponse) => void;
   reject: (error: Error) => void;
   timeout?: ReturnType<typeof setTimeout>;
+  onProgressState?: (state: ProgressState) => void;
+  /** Tracked turn progress state for streaming updates */
+  progressState: ProgressState;
+  /** Start time of the turn, used to compute durationMs */
+  startTime: number;
 };
+
+type AsyncMessageHandler = (text: string) => void;
 
 type ClaudeWorker = {
   child: ClaudeChildProcess;
@@ -82,6 +144,9 @@ type ClaudeWorker = {
   instructions: string | null;
   approvalMode: ApprovalMode;
   engineOptionsKey: string;
+  model?: string;
+  onAsyncMessage?: AsyncMessageHandler;
+  lastCompactionTimestamp?: string;
 };
 
 const MAX_INSTRUCTIONS_CHARS = 16_000;
@@ -229,9 +294,9 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     const approvalMode = this.configPath ? await this.loadApprovalMode() : "normal";
     const engineOptions = this.configPath ? await this.loadEngineOptions() : {};
     const prompt = this.buildPrompt(input);
-    const worker = this.getOrCreateWorker(sessionId, agentInstructions, bridgeInstructions, approvalMode, engineOptions);
+    const worker = this.getOrCreateWorker(sessionId, agentInstructions, bridgeInstructions, approvalMode, engineOptions, input.onAsyncMessage);
 
-    const response = await this.sendTurn(worker, prompt, input.abortSignal);
+    const response = await this.sendTurn(worker, prompt, input.onProgressState, input.abortSignal);
     const nextSessionId = response.sessionId;
     if (nextSessionId && nextSessionId !== sessionId) {
       this.workers.delete(sessionId);
@@ -241,6 +306,7 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     return {
       text: response.text,
       sessionId: nextSessionId && nextSessionId !== sessionId ? nextSessionId : undefined,
+      usage: response.usage,
     };
   }
 
@@ -251,12 +317,16 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     return parts.join("\n");
   }
 
-  private getOrCreateWorker(sessionId: string, agentInstructions: string | null, bridgeInstructions: string | null, approvalMode: ApprovalMode, engineOptions?: { effort?: string; model?: string }): ClaudeWorker {
+  private getOrCreateWorker(sessionId: string, agentInstructions: string | null, bridgeInstructions: string | null, approvalMode: ApprovalMode, engineOptions?: { effort?: string; model?: string }, onAsyncMessage?: AsyncMessageHandler): ClaudeWorker {
     const combinedKey = combineInstructions(agentInstructions, bridgeInstructions);
     const optionsKey = `${engineOptions?.effort ?? ""}:${engineOptions?.model ?? ""}`;
     const existing = this.workers.get(sessionId);
     if (existing) {
       if (existing.instructions === combinedKey && existing.approvalMode === approvalMode && existing.engineOptionsKey === optionsKey) {
+        // Update onAsyncMessage if changed
+        if (onAsyncMessage) {
+          existing.onAsyncMessage = onAsyncMessage;
+        }
         return existing;
       }
 
@@ -270,7 +340,7 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       sessionId = resumedSessionId;
     }
 
-    const args = ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json"];
+    const args = ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--include-hook-events"];
     if (agentInstructions) {
       args.push("--system-prompt", agentInstructions);
     }
@@ -312,6 +382,8 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       instructions: combinedKey,
       approvalMode,
       engineOptionsKey: optionsKey,
+      model: engineOptions?.model,
+      onAsyncMessage,
     };
 
     child.stdout?.on("data", (chunk) => {
@@ -364,15 +436,133 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       worker.currentSessionId = parsed.session_id;
     }
 
-    if (parsed.type === "assistant" && worker.pendingTurn) {
-      const text =
-        parsed.message?.content
-          ?.filter((item) => item.type === "text" && typeof item.text === "string")
-          .map((item) => item.text ?? "")
-          .join("") ?? "";
-      if (text) {
-        worker.pendingTurn.assistantText = text;
+    // Handle system events
+    if (parsed.type === "system") {
+      if (parsed.subtype === "compact_boundary") {
+        // Fallback: compact_boundary is currently transcript-only, but handle it if ever emitted
+        const timestamp = parsed.timestamp ?? new Date().toISOString();
+        if (worker.lastCompactionTimestamp === timestamp) {
+          console.debug(`[ClaudeStreamAdapter] Duplicate compaction event skipped: ${timestamp}`);
+          return;
+        }
+        worker.lastCompactionTimestamp = timestamp;
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) {
+          console.info("[ClaudeStreamAdapter] Invalid compaction timestamp:", timestamp);
+          return;
+        }
+        const localTime = date.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
+        const notice = `🪦 对话上下文已压缩（${localTime}）。早期对话内容可能丢失。`;
+        console.info(`[ClaudeStreamAdapter] Compaction detected via compact_boundary: ${timestamp}`);
+        if (worker.onAsyncMessage) {
+          Promise.resolve(worker.onAsyncMessage(notice)).catch(err => {
+            console.error("[ClaudeStreamAdapter] Compaction notice delivery failed:", err);
+          });
+        }
+      } else if (parsed.subtype === "hook_started" && parsed.hook_event) {
+        // Detect compaction via PreCompact/PostCompact hook events
+        const hookEvent = parsed.hook_event;
+        if (hookEvent === "PreCompact" || hookEvent === "PostCompact") {
+          const timestamp = parsed.timestamp ?? new Date().toISOString();
+          // Deduplicate: use hook_event as key to avoid double-notify for PreCompact+PostCompact
+          const dedupKey = `${timestamp.slice(0, 19)}-${hookEvent}`;
+          if (worker.lastCompactionTimestamp === dedupKey) {
+            console.debug(`[ClaudeStreamAdapter] Duplicate compaction hook skipped: ${hookEvent}`);
+            return;
+          }
+          worker.lastCompactionTimestamp = dedupKey;
+          // Only notify on PostCompact (compaction is confirmed done)
+          if (hookEvent === "PostCompact") {
+            const localTime = new Date(timestamp).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
+            const notice = `🪦 对话上下文已压缩（${localTime}）。早期对话内容可能丢失。`;
+            console.info(`[ClaudeStreamAdapter] Compaction detected via ${hookEvent} hook`);
+            if (worker.onAsyncMessage) {
+              Promise.resolve(worker.onAsyncMessage(notice)).catch(err => {
+                console.error("[ClaudeStreamAdapter] Compaction notice delivery failed:", err);
+              });
+            }
+          }
+        } else {
+          console.debug(`[ClaudeStreamAdapter] Hook started: ${parsed.hook_name ?? hookEvent}`);
+        }
+      } else {
+        console.debug(`[ClaudeStreamAdapter] System event: ${parsed.subtype ?? "unknown"}`, JSON.stringify(parsed).slice(0, 200));
       }
+      return;
+    }
+
+    // Handle async messages (e.g., task notifications) when no pending turn
+    if (parsed.type === "assistant" && !worker.pendingTurn) {
+      const content = parsed.message?.content ?? [];
+      let text = "";
+      for (const item of content) {
+        if (item.type === "text" && typeof item.text === "string") {
+          text += item.text;
+        }
+      }
+      if (text.trim()) {
+        if (worker.onAsyncMessage) {
+          Promise.resolve(worker.onAsyncMessage(text.trim())).catch(err => {
+            console.error("[ClaudeStreamAdapter] Async message delivery failed:", err);
+          });
+        } else {
+          console.warn("[ClaudeStreamAdapter] Received async message but onAsyncMessage handler not defined");
+        }
+      }
+      return;
+    }
+
+    if (parsed.type === "assistant" && worker.pendingTurn) {
+      const pending = worker.pendingTurn;
+
+      // A new assistant message means previous tools have completed
+      for (const tc of pending.progressState.toolCalls) {
+        if (tc.status === "running") tc.status = "done";
+      }
+
+      const content = parsed.message?.content ?? [];
+
+      let text = "";
+      let thinking = "";
+      const newToolCalls: ToolCall[] = [];
+
+      for (const item of content) {
+        if (item.type === "text" && typeof item.text === "string") {
+          text += item.text;
+        } else if (item.type === "thinking" && typeof item.thinking === "string") {
+          thinking += item.thinking;
+        } else if (item.type === "tool_use" && item.name) {
+          newToolCalls.push({
+            name: item.name,
+            detail: formatToolDetail(item.name, item.input),
+            status: "running",
+          });
+        }
+      }
+
+      if (text) {
+        pending.assistantText = text;
+      }
+
+      // Update progress state
+      const progressState = pending.progressState;
+      progressState.responseText = pending.assistantText;
+
+      // Determine status based on content
+      if (newToolCalls.length > 0) {
+        progressState.status = "running";
+        for (const newCall of newToolCalls) {
+          progressState.toolCalls.push(newCall);
+        }
+      } else if (thinking && !text) {
+        progressState.status = "thinking";
+      }
+
+      // Emit progress update
+      if (pending.onProgressState) {
+        pending.onProgressState({ ...progressState });
+      }
+
       return;
     }
 
@@ -380,6 +570,38 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       const pending = worker.pendingTurn;
       worker.pendingTurn = null;
       this.clearPendingTurnTimeout(pending);
+
+      const progressState = pending.progressState;
+
+      // Mark all tool calls as done
+      progressState.toolCalls.forEach((tc) => {
+        tc.status = "done";
+      });
+      progressState.status = parsed.is_error ? "error" : "complete";
+      progressState.responseText = (parsed.result ?? pending.assistantText ?? "").trim();
+      progressState.durationMs = Date.now() - pending.startTime;
+      if (parsed.is_error) {
+        progressState.errorMessage = progressState.responseText || "Claude reported an error";
+      }
+
+      // Extract usage data from result event
+      const usage = parsed.usage ? {
+        inputTokens: parsed.usage.input_tokens ?? 0,
+        outputTokens: parsed.usage.output_tokens ?? 0,
+        cacheReadTokens: parsed.usage.cache_read_input_tokens ?? 0,
+        cacheCreationTokens: parsed.usage.cache_creation_input_tokens ?? 0,
+        costUsd: parsed.total_cost_usd ?? undefined,
+      } : undefined;
+
+      if (usage) {
+        progressState.usage = usage;
+      }
+
+      // Single final progress emit (usage + status in one call)
+      if (pending.onProgressState) {
+        pending.onProgressState({ ...progressState });
+      }
+
       if (parsed.is_error) {
         pending.reject(new Error((parsed.result ?? pending.assistantText ?? "Claude reported an error").trim()));
         return;
@@ -387,11 +609,17 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       pending.resolve({
         text: (parsed.result ?? pending.assistantText ?? "").trim() || "Claude completed the request.",
         sessionId: worker.currentSessionId ?? undefined,
+        usage,
       });
     }
   }
 
-  private async sendTurn(worker: ClaudeWorker, prompt: string, abortSignal?: AbortSignal): Promise<CodexAdapterResponse> {
+  private async sendTurn(
+    worker: ClaudeWorker,
+    prompt: string,
+    onProgressState?: (state: ProgressState) => void,
+    abortSignal?: AbortSignal,
+  ): Promise<CodexAdapterResponse> {
     if (worker.pendingTurn) {
       throw new Error("Claude session already has an in-flight turn");
     }
@@ -399,8 +627,18 @@ export class ClaudeStreamAdapter implements CodexAdapter {
     return await new Promise<CodexAdapterResponse>((resolve, reject) => {
       const pendingTurn: PendingTurn = {
         assistantText: "",
+        userPrompt: prompt,
         resolve,
         reject,
+        onProgressState,
+        startTime: Date.now(),
+        progressState: {
+          status: "thinking",
+          userPrompt: prompt,
+          responseText: "",
+          toolCalls: [],
+          model: worker.model,
+        },
       };
       worker.pendingTurn = pendingTurn;
 

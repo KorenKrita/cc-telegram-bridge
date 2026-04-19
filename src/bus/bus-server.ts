@@ -26,6 +26,14 @@ export interface BusTalkResponse {
   durationMs?: number;
   protocolVersion?: number;
   capabilities?: string[];
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens?: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    costUsd?: number;
+  };
 }
 
 export type BusTalkHandler = (req: BusTalkRequest) => Promise<BusTalkResponse>;

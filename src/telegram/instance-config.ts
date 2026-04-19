@@ -24,6 +24,7 @@ export interface InstanceConfig {
   effort: EffortLevel | undefined;
   model: string | undefined;
   resume: ResumeState | undefined;
+  groupChatIds: number[] | undefined;
 }
 
 const VALID_EFFORT_LEVELS: EffortLevel[] = [...EFFORT_LEVELS];
@@ -50,6 +51,7 @@ export const DEFAULT_INSTANCE_CONFIG: InstanceConfig = {
   effort: undefined,
   model: undefined,
   resume: undefined,
+  groupChatIds: undefined,
 };
 
 export async function loadInstanceConfig(stateDir: string): Promise<InstanceConfig> {
@@ -97,6 +99,7 @@ export async function loadInstanceConfig(stateDir: string): Promise<InstanceConf
     effort,
     model: typeof config.model === "string" && config.model.trim() ? config.model.trim() : undefined,
     resume: parseResumeState(config.resume),
+    groupChatIds: Array.isArray(config.groupChatIds) ? config.groupChatIds.filter((id): id is number => typeof id === "number") : undefined,
   };
 }
 

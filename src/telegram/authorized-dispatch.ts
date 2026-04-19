@@ -1,3 +1,4 @@
+import type { ProgressState } from "../codex/progress-types.js";
 import type { FileWorkflowStore } from "../state/file-workflow-store.js";
 import { handleCrewTelegramWorkflow as defaultHandleCrewTelegramWorkflow } from "./crew-workflow.js";
 import type { SessionStore } from "../state/session-store.js";
@@ -24,7 +25,7 @@ export interface AuthorizedTelegramDispatchConfig {
 }
 
 export interface AuthorizedTelegramDispatchContext {
-  api: Pick<TelegramApi, "sendMessage" | "getFile" | "downloadFile">;
+  api: Pick<TelegramApi, "sendMessage" | "getFile" | "downloadFile" | "editMessage">;
   bridge: {
     validateCodexThread?(threadId: string): Promise<void>;
     handleAuthorizedMessage(input: {
@@ -38,12 +39,16 @@ export interface AuthorizedTelegramDispatchContext {
       requestOutputDir?: string;
       workspaceOverride?: string;
       abortSignal?: AbortSignal;
+      onProgressState?: (state: ProgressState) => void;
+      onAsyncMessage?: (text: string) => void | Promise<void>;
     }): Promise<{
       text: string;
       usage?: {
         inputTokens: number;
         outputTokens: number;
         cachedTokens?: number;
+        cacheReadTokens?: number;
+        cacheCreationTokens?: number;
         costUsd?: number;
       };
     }>;

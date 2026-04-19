@@ -114,6 +114,7 @@ describe("ClaudeStreamAdapter", () => {
       "stream-json",
       "--output-format",
       "stream-json",
+      "--include-hook-events",
     ]);
     children[0].stdout.emitData('{"type":"system","subtype":"init","session_id":"session-123"}\n');
     children[0].stdout.emitData('{"type":"assistant","message":{"content":[{"type":"text","text":"ONE"}]},"session_id":"session-123"}\n');
@@ -160,6 +161,7 @@ describe("ClaudeStreamAdapter", () => {
       "stream-json",
       "--output-format",
       "stream-json",
+      "--include-hook-events",
       "-r",
       "session-abc",
     ]);

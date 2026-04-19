@@ -46,6 +46,7 @@ export interface TelegramDeliveryContext {
   onAuthRetry?: () => Promise<void>;
   _authRetried?: boolean;
   _staleSessionRetried?: boolean;
+  verbosity?: number;
 }
 
 export async function handleNormalizedTelegramMessage(
@@ -124,6 +125,9 @@ export async function handleNormalizedTelegramMessage(
       return;
     }
 
+    // Pass verbosity through context for progress streaming
+    const contextWithVerbosity = { ...context, verbosity: cfg.verbosity };
+
     await dispatchAuthorizedTelegramMessage({
       stateDir,
       startedAt,
@@ -136,7 +140,7 @@ export async function handleNormalizedTelegramMessage(
         resume: cfg.resume,
       },
       normalized,
-      context,
+      context: contextWithVerbosity,
       workflowStore,
       deps: {
         sessionStore,

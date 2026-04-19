@@ -975,9 +975,7 @@ export async function pollTelegramUpdatesOnce(
     // Offset is NOT advanced here — processTelegramUpdates marks handled
     // updates in the runtime state store, and we read back the last handled
     // ID for the next poll to avoid message loss on crash.
-    void processTelegramUpdates(updates, { api, bridge, inboxDir, instanceName, groupHandler }, logger).catch((error) => {
-      logger.error(formatErrorMessage("Background update processing failed", error));
-    });
+    await processTelegramUpdates(updates, { api, bridge, inboxDir, instanceName, groupHandler }, logger);
     const lastHandled = await getLastHandledUpdateId(inboxDir);
     return {
       offset: lastHandled !== null ? lastHandled + 1 : offset,
@@ -1026,7 +1024,8 @@ export async function pollTelegramUpdates(
   instanceName?: string,
   groupHandler?: GroupHandler,
 ): Promise<void> {
-  let offset: number | undefined;
+  const initialLastHandled = await getLastHandledUpdateId(inboxDir);
+  let offset = initialLastHandled !== null ? initialLastHandled + 1 : undefined;
   let backoffMs = 1000;
   const maxBackoffMs = 60000;
 

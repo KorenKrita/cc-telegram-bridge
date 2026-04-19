@@ -174,8 +174,8 @@ export class MessageParser {
     const usernameWithoutAt = this.botUsername.startsWith("@")
       ? this.botUsername.slice(1)
       : this.botUsername;
-    // Use word boundary to ensure exact match: @BotName followed by space, newline, or end of string
-    const pattern = new RegExp(`@${usernameWithoutAt}(?:\\s|$)`);
+    // Use negative lookahead: match @BotName as long as it's not followed by a word character
+    const pattern = new RegExp(`@${usernameWithoutAt}(?!\\w)`);
     return pattern.test(text);
   }
 }

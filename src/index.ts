@@ -13,6 +13,8 @@ import { createBusServer, startBusServer, stopBusServer } from "./bus/bus-server
 import { createBusTalkHandler } from "./bus/bus-handler.js";
 import { pruneStaleInstances, registerInstance, deregisterInstance, resolveChannelRoot } from "./bus/bus-registry.js";
 import { UsageStore } from "./state/usage-store.js";
+import { GroupHandler } from "./telegram/group-handler.js";
+import type { GroupMessageInput } from "./telegram/types.js";
 
 async function main(): Promise<void> {
   try {
@@ -77,9 +79,39 @@ async function main(): Promise<void> {
       console.log(`Bus server listening on 127.0.0.1:${boundPort}`);
     }
 
+    // Parse allowed chat IDs from environment (comma-separated)
+    const allowedChatIdsEnv = process.env.TELEGRAM_ALLOWED_CHAT_IDS;
+    const allowedChatIds = allowedChatIdsEnv
+      ? allowedChatIdsEnv.split(",").map((id) => Number.parseInt(id.trim(), 10)).filter((id) => !Number.isNaN(id))
+      : [];
+
+    // Start group handler if allowed chat IDs are configured
+    let groupHandler: GroupHandler | null = null;
+    if (allowedChatIds.length > 0) {
+      groupHandler = new GroupHandler({
+        botToken: config.telegramBotToken,
+        allowedChatIds,
+        onMessage: async (input: GroupMessageInput) => {
+          await bridge.handleGroupMessage({
+            ...input,
+            onProgress: (partialText: string) => {
+              // Optional: send typing indicator or progress updates
+              console.log(`[GroupHandler] Progress: ${partialText.slice(0, 50)}...`);
+            },
+          });
+        },
+      });
+      await groupHandler.start();
+    } else {
+      console.log("[Main] TELEGRAM_ALLOWED_CHAT_IDS not configured, group handler disabled");
+    }
+
     try {
       await pollTelegramUpdates(api, bridge, config.inboxDir, console, abortController.signal, instanceName);
     } finally {
+      if (groupHandler) {
+        await groupHandler.stop();
+      }
       if (busServer) {
         await stopBusServer(busServer);
         await deregisterInstance(channelRoot, instanceName);

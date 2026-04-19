@@ -14,6 +14,7 @@ import { createBusTalkHandler } from "./bus/bus-handler.js";
 import { pruneStaleInstances, registerInstance, deregisterInstance, resolveChannelRoot } from "./bus/bus-registry.js";
 import { UsageStore } from "./state/usage-store.js";
 import { GroupHandler } from "./telegram/group-handler.js";
+import { loadInstanceConfig } from "./telegram/instance-config.js";
 import type { GroupMessageInput } from "./telegram/types.js";
 
 async function main(): Promise<void> {
@@ -79,11 +80,9 @@ async function main(): Promise<void> {
       console.log(`Bus server listening on 127.0.0.1:${boundPort}`);
     }
 
-    // Parse allowed chat IDs from environment (comma-separated)
-    const allowedChatIdsEnv = process.env.TELEGRAM_ALLOWED_CHAT_IDS;
-    const allowedChatIds = allowedChatIdsEnv
-      ? allowedChatIdsEnv.split(",").map((id) => Number.parseInt(id.trim(), 10)).filter((id) => !Number.isNaN(id))
-      : [];
+    // Load instance config to get allowed group chat IDs
+    const instanceConfig = await loadInstanceConfig(config.stateDir);
+    const allowedChatIds = instanceConfig.groupChatIds ?? [];
 
     // Start group handler if allowed chat IDs are configured
     let groupHandler: GroupHandler | null = null;
@@ -103,7 +102,7 @@ async function main(): Promise<void> {
       });
       await groupHandler.start();
     } else {
-      console.log("[Main] TELEGRAM_ALLOWED_CHAT_IDS not configured, group handler disabled");
+      console.log("[Main] groupChatIds not configured in config.json, group handler disabled");
     }
 
     try {

@@ -84,8 +84,6 @@ export interface GroupHandlerOptions {
   onMessage: (input: GroupMessageInput) => Promise<void>;
   /** Optional: restrict to specific chat IDs */
   allowedChatIds?: number[];
-  /** Polling interval in ms (default: 1000) */
-  pollingIntervalMs?: number;
 }
 
 // Group handler state
@@ -93,7 +91,6 @@ export interface GroupHandlerState {
   botUsername?: string;
   botId?: number;
   isRunning: boolean;
-  lastUpdateId?: number;
 }
 
 // Bot identity (fetched at runtime)
@@ -108,11 +105,6 @@ export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
   edited_message?: TelegramMessage;
-}
-
-export interface GetUpdatesResponse {
-  ok: boolean;
-  result: TelegramUpdate[];
 }
 
 export interface GetMeResponse {

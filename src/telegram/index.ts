@@ -14,6 +14,5 @@ export type {
   GroupHandlerState,
   BotIdentity,
   RoutingContext,
-  GetUpdatesResponse,
   GetMeResponse,
 } from "./types.js";

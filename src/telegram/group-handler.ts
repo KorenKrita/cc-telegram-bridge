@@ -16,7 +16,6 @@ import type {
   GroupHandlerState,
   BotIdentity,
   RoutingContext,
-  GetUpdatesResponse,
   GetMeResponse,
 } from "./types.js";
 
@@ -25,12 +24,8 @@ export class GroupHandler {
     isRunning: false,
   };
   private parser?: MessageParser;
-  private pollingTimer?: ReturnType<typeof setTimeout>;
-  private readonly pollingIntervalMs: number;
 
-  constructor(private readonly options: GroupHandlerOptions) {
-    this.pollingIntervalMs = options.pollingIntervalMs ?? 1000;
-  }
+  constructor(private readonly options: GroupHandlerOptions) {}
 
   /**
    * Start listening for group messages
@@ -60,9 +55,7 @@ export class GroupHandler {
       }
     }
 
-    // Start polling loop
-    this.scheduleNextPoll();
-    console.log("[GroupHandler] Started polling for group messages");
+    console.log("[GroupHandler] Ready to process group messages");
   }
 
   /**
@@ -70,10 +63,6 @@ export class GroupHandler {
    */
   async stop(): Promise<void> {
     this.state.isRunning = false;
-    if (this.pollingTimer) {
-      clearTimeout(this.pollingTimer);
-      this.pollingTimer = undefined;
-    }
     console.log("[GroupHandler] Stopped");
   }
 
@@ -105,76 +94,9 @@ export class GroupHandler {
   }
 
   /**
-   * Schedule next polling iteration
+   * Process a single update (called by main polling loop)
    */
-  private scheduleNextPoll(): void {
-    if (!this.state.isRunning) {
-      return;
-    }
-
-    this.pollingTimer = setTimeout(() => {
-      void this.pollOnce();
-    }, this.pollingIntervalMs);
-  }
-
-  /**
-   * Single polling iteration
-   */
-  private async pollOnce(): Promise<void> {
-    if (!this.state.isRunning) {
-      return;
-    }
-
-    try {
-      const updates = await this.fetchUpdates();
-
-      for (const update of updates) {
-        await this.processUpdate(update);
-        // Update last processed update_id
-        this.state.lastUpdateId = update.update_id;
-      }
-    } catch (error) {
-      console.error("[GroupHandler] Polling error:", error);
-    } finally {
-      this.scheduleNextPoll();
-    }
-  }
-
-  /**
-   * Fetch updates from Telegram API
-   */
-  private async fetchUpdates(): Promise<TelegramUpdate[]> {
-    const params = new URLSearchParams();
-    params.set("limit", "100");
-
-    if (this.state.lastUpdateId) {
-      // Fetch updates after the last processed one
-      params.set("offset", String(this.state.lastUpdateId + 1));
-    }
-
-    const response = await fetch(
-      `https://api.telegram.org/bot${this.options.botToken}/getUpdates?${params.toString()}`
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `getUpdates API failed: ${response.status} ${response.statusText}`
-      );
-    }
-
-    const data = (await response.json()) as GetUpdatesResponse;
-
-    if (!data.ok) {
-      throw new Error("getUpdates API returned ok: false");
-    }
-
-    return data.result;
-  }
-
-  /**
-   * Process a single update
-   */
-  private async processUpdate(update: TelegramUpdate): Promise<void> {
+  async processUpdate(update: TelegramUpdate): Promise<void> {
     const message = update.message ?? update.edited_message;
     if (!message) {
       return;

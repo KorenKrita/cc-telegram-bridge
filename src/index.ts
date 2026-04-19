@@ -106,7 +106,7 @@ async function main(): Promise<void> {
     }
 
     try {
-      await pollTelegramUpdates(api, bridge, config.inboxDir, console, abortController.signal, instanceName);
+      await pollTelegramUpdates(api, bridge, config.inboxDir, console, abortController.signal, instanceName, groupHandler ?? undefined);
     } finally {
       if (groupHandler) {
         await groupHandler.stop();

@@ -21,6 +21,7 @@ import { SessionManager } from "./runtime/session-manager.js";
 import { normalizeInstanceName } from "./instance.js";
 import { ChatQueue } from "./runtime/chat-queue.js";
 import { classifyFailure } from "./runtime/error-classification.js";
+import { GroupHandler } from "./telegram/group-handler.js";
 
 export interface ServiceDependencies {
   api: TelegramApi;
@@ -29,6 +30,7 @@ export interface ServiceDependencies {
 
 export interface TelegramServiceContext extends TelegramDeliveryContext {
   chatQueue?: ChatQueue;
+  groupHandler?: GroupHandler;
 }
 
 export interface ResolvedInstanceEnv extends EnvSource {
@@ -825,6 +827,31 @@ export async function processTelegramUpdates(
         continue;
       }
 
+      // Route group/supergroup messages to GroupHandler
+      if (context.groupHandler) {
+        const rawUpdate = update as Record<string, unknown>;
+        const msg = (rawUpdate.message ?? rawUpdate.edited_message) as Record<string, unknown> | undefined;
+        const chat = msg?.chat as Record<string, unknown> | undefined;
+        if (chat && (chat.type === "group" || chat.type === "supergroup")) {
+          const telegramUpdate = {
+            update_id: updateId ?? 0,
+            message: rawUpdate.message,
+            edited_message: rawUpdate.edited_message,
+          } as import("./telegram/types.js").TelegramUpdate;
+          try {
+            await context.groupHandler.processUpdate(telegramUpdate);
+          } catch (error) {
+            logger.error(formatErrorMessage("GroupHandler processing error", error));
+          }
+          if (updateId !== undefined) {
+            await runtimeStateStore.markHandledUpdateId(updateId);
+            lastHandledUpdateId = updateId;
+          }
+          nextOffset = advanceOffset(nextOffset, completedOffset);
+          continue;
+        }
+      }
+
       const normalized = normalizeUpdate(update);
       if (!normalized) {
         if (updateId !== undefined) {
@@ -928,6 +955,7 @@ export async function pollTelegramUpdatesOnce(
   offset?: number,
   signal?: AbortSignal,
   instanceName?: string,
+  groupHandler?: GroupHandler,
 ): Promise<{ offset: number | undefined; hadFetchError: boolean; hadUpdates: boolean; conflict: boolean }> {
   try {
     const updates = await api.getUpdates(offset, signal);
@@ -936,7 +964,7 @@ export async function pollTelegramUpdatesOnce(
     // Offset is NOT advanced here — processTelegramUpdates marks handled
     // updates in the runtime state store, and we read back the last handled
     // ID for the next poll to avoid message loss on crash.
-    void processTelegramUpdates(updates, { api, bridge, inboxDir, instanceName }, logger).catch((error) => {
+    void processTelegramUpdates(updates, { api, bridge, inboxDir, instanceName, groupHandler }, logger).catch((error) => {
       logger.error(formatErrorMessage("Background update processing failed", error));
     });
     const lastHandled = await getLastHandledUpdateId(inboxDir);
@@ -985,6 +1013,7 @@ export async function pollTelegramUpdates(
   logger: Pick<Console, "error"> = console,
   signal?: AbortSignal,
   instanceName?: string,
+  groupHandler?: GroupHandler,
 ): Promise<void> {
   let offset: number | undefined;
   let backoffMs = 1000;
@@ -992,7 +1021,7 @@ export async function pollTelegramUpdates(
 
   while (!signal?.aborted) {
     const previousOffset = offset;
-    const result = await pollTelegramUpdatesOnce(api, bridge, inboxDir, logger, offset, signal, instanceName);
+    const result = await pollTelegramUpdatesOnce(api, bridge, inboxDir, logger, offset, signal, instanceName, groupHandler);
     offset = result.offset;
 
     if (result.conflict) {

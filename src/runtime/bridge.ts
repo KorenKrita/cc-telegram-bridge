@@ -6,6 +6,10 @@ import {
   renderUnauthorizedMessage,
 } from "../telegram/message-renderer.js";
 import type { GroupMessageInput } from "../telegram/types.js";
+import { ChatQueue } from "./chat-queue.js";
+
+// Queue for group chat messages to prevent concurrent turns on same session
+const groupChatQueue = new ChatQueue();
 
 export interface AccessStoreLike {
   load(): Promise<{
@@ -230,72 +234,75 @@ export class Bridge {
       abortSignal?: AbortSignal;
     }
   ): Promise<{ text: string; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number } }> {
-    // Group chats bypass access control (anyone in the group can interact)
-    const session = await this.sessionManager.getOrCreateSession(input.chatId);
+    // Queue group messages per chat to prevent concurrent turns on same session
+    return groupChatQueue.enqueue(input.chatId, async () => {
+      // Group chats bypass access control (anyone in the group can interact)
+      const session = await this.sessionManager.getOrCreateSession(input.chatId);
 
-    // Build context-aware prompt
-    let text = input.taskContent;
+      // Build context-aware prompt
+      let text = input.taskContent;
 
-    // Add replied message context if available
-    if (input.replyToMessageId && input.repliedMessageContent) {
-      const repliedSender = input.repliedMessageFrom?.username
-        ? `@${input.repliedMessageFrom.username}`
-        : input.repliedMessageFrom?.type === 'bot'
-          ? `Bot(${input.repliedMessageFrom.id})`
-          : input.repliedMessageFrom
-            ? `User(${input.repliedMessageFrom.id})`
-            : 'Unknown';
-      text = `${text}\n\n[Reply to ${repliedSender}'s message #${input.replyToMessageId}]\n${input.repliedMessageContent}`;
-    }
+      // Add replied message context if available
+      if (input.replyToMessageId && input.repliedMessageContent) {
+        const repliedSender = input.repliedMessageFrom?.username
+          ? `@${input.repliedMessageFrom.username}`
+          : input.repliedMessageFrom?.type === 'bot'
+            ? `Bot(${input.repliedMessageFrom.id})`
+            : input.repliedMessageFrom
+              ? `User(${input.repliedMessageFrom.id})`
+              : 'Unknown';
+        text = `${text}\n\n[Reply to ${repliedSender}'s message #${input.replyToMessageId}]\n${input.repliedMessageContent}`;
+      }
 
-    // Add user/bot context for better understanding
-    const senderLabel = input.from.username
-      ? `@${input.from.username}`
-      : input.from.type === "bot"
-        ? `Bot(${input.from.id})`
-        : `User(${input.from.id})`;
+      // Add user/bot context for better understanding
+      const senderLabel = input.from.username
+        ? `@${input.from.username}`
+        : input.from.type === "bot"
+          ? `Bot(${input.from.id})`
+          : `User(${input.from.id})`;
 
-    const routingLabel = input.routing.isMentioned
-      ? "mentioned"
-      : input.routing.isReply
-        ? "reply"
-        : "direct";
+      const routingLabel = input.routing.isMentioned
+        ? "mentioned"
+        : input.routing.isReply
+          ? "reply"
+          : "direct";
 
-    const contextualPrompt = `[${senderLabel} via ${routingLabel}]\n${text}`;
+      const contextualPrompt = `[${senderLabel} via ${routingLabel}]\n${text}`;
 
-    const instructions = combineInstructions(
-      renderTelegramBridgeCapabilities(),
-      this.bridgeInstructionMode === "telegram-out-only" && input.requestOutputDir
-        ? renderCodexTelegramOutInstructions(input.requestOutputDir)
-        : undefined,
-    );
+      const instructions = combineInstructions(
+        renderTelegramBridgeCapabilities(),
+        this.bridgeInstructionMode === "telegram-out-only" && input.requestOutputDir
+          ? renderCodexTelegramOutInstructions(input.requestOutputDir)
+          : undefined,
+      );
 
-    const response = await this.adapter.sendUserMessage(session.sessionId, {
-      text: contextualPrompt,
-      files: [], // Group messages don't support file attachments yet
-      instructions,
-      onProgress: input.onProgress,
-      onProgressState: input.onProgressState,
-      onAsyncMessage: input.onAsyncMessage,
-      requestOutputDir: input.requestOutputDir,
-      workspaceOverride: input.workspaceOverride,
-      abortSignal: input.abortSignal,
+      const response = await this.adapter.sendUserMessage(session.sessionId, {
+        text: contextualPrompt,
+        files: [], // Group messages don't support file attachments yet
+        instructions,
+        onProgress: input.onProgress,
+        onProgressState: input.onProgressState,
+        onAsyncMessage: input.onAsyncMessage,
+        requestOutputDir: input.requestOutputDir,
+        workspaceOverride: input.workspaceOverride,
+        abortSignal: input.abortSignal,
+      });
+
+      if (response.sessionId && response.sessionId !== session.sessionId) {
+        await this.sessionManager.bindSession(input.chatId, response.sessionId);
+      }
+
+      return {
+        text: response.text,
+        usage: response.usage
+          ? {
+              inputTokens: response.usage.inputTokens,
+              outputTokens: response.usage.outputTokens,
+              cacheReadTokens: response.usage.cacheReadTokens,
+              cacheCreationTokens: response.usage.cacheCreationTokens,
+            }
+          : undefined,
+      };
     });
-
-    if (response.sessionId && response.sessionId !== session.sessionId) {
-      await this.sessionManager.bindSession(input.chatId, response.sessionId);
-    }
-
-    return {
-      text: response.text,
-      usage: response.usage
-        ? {
-            inputTokens: response.usage.inputTokens,
-            outputTokens: response.usage.outputTokens,
-            cacheReadTokens: response.usage.cacheReadTokens,
-            cacheCreationTokens: response.usage.cacheCreationTokens,
-          }
-        : undefined,
-    };
   }
 }

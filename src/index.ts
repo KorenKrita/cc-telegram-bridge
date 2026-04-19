@@ -91,13 +91,56 @@ async function main(): Promise<void> {
         botToken: config.telegramBotToken,
         allowedChatIds,
         onMessage: async (input: GroupMessageInput) => {
-          await bridge.handleGroupMessage({
-            ...input,
-            onProgress: (partialText: string) => {
-              // Optional: send typing indicator or progress updates
-              console.log(`[GroupHandler] Progress: ${partialText.slice(0, 50)}...`);
-            },
-          });
+          console.log(`[GroupHandler] onMessage triggered: chatId=${input.chatId}, messageId=${input.messageId}, isMentioned=${input.routing.isMentioned}, isReply=${input.routing.isReply}`);
+
+          // Send typing indicator
+          try {
+            await api.sendChatAction(input.chatId, "typing");
+            console.log(`[GroupHandler] Typing indicator sent to chat ${input.chatId}`);
+          } catch (typingErr) {
+            console.warn(`[GroupHandler] Failed to send typing indicator:`, typingErr);
+          }
+
+          let response;
+          try {
+            console.log(`[GroupHandler] Calling bridge.handleGroupMessage for chat ${input.chatId}...`);
+            response = await bridge.handleGroupMessage({
+              ...input,
+              onProgress: (partialText: string) => {
+                console.log(`[GroupHandler] Progress: ${partialText.slice(0, 50)}...`);
+              },
+              onAsyncMessage: (text: string) => {
+                console.log(`[GroupHandler] Async message: ${text.slice(0, 100)}...`);
+                // Send async messages (like compaction notices) immediately
+                api.sendMessage(input.chatId, text).catch((err) => {
+                  console.error(`[GroupHandler] Failed to send async message:`, err);
+                });
+              },
+            });
+            console.log(`[GroupHandler] bridge.handleGroupMessage completed, response length: ${response.text.length}`);
+          } catch (err) {
+            console.error(`[GroupHandler] bridge.handleGroupMessage failed:`, err);
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            try {
+              await api.sendMessage(input.chatId, `❌ 处理失败: ${errorMessage}`);
+            } catch (sendErr) {
+              console.error(`[GroupHandler] Failed to send error message:`, sendErr);
+            }
+            return;
+          }
+
+          // Send the response back to the group chat
+          try {
+            console.log(`[GroupHandler] Sending response to chat ${input.chatId}, text length: ${response.text.length}`);
+            await api.sendMessage(input.chatId, response.text);
+            console.log(`[GroupHandler] Response sent successfully to chat ${input.chatId}`);
+
+            if (response.usage) {
+              console.log(`[GroupHandler] Usage: inputTokens=${response.usage.inputTokens}, outputTokens=${response.usage.outputTokens}`);
+            }
+          } catch (sendErr) {
+            console.error(`[GroupHandler] Failed to send response:`, sendErr);
+          }
         },
       });
       await groupHandler.start();

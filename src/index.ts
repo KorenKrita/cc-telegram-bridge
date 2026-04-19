@@ -106,6 +106,11 @@ async function main(): Promise<void> {
             console.log(`[GroupHandler] Calling bridge.handleGroupMessage for chat ${input.chatId}...`);
             response = await bridge.handleGroupMessage({
               ...input,
+              locale: "zh",
+              sendMessage: async (chatId: number, text: string) => {
+                await api.sendMessage(chatId, text);
+              },
+              stateDir: serviceConfig.stateDir,
               onProgress: (partialText: string) => {
                 console.log(`[GroupHandler] Progress: ${partialText.slice(0, 50)}...`);
               },

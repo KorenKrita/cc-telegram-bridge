@@ -8,6 +8,39 @@ import {
 import type { GroupMessageInput } from "../telegram/types.js";
 import { ChatQueue } from "./chat-queue.js";
 
+// Command detection helpers for group chat
+function isResetCommand(text: string): boolean {
+  return /^\/reset(?:@\w+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isCompactCommand(text: string): boolean {
+  return /^\/compact(?:@\w+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isContextCommand(text: string): boolean {
+  return /^\/context(?:@\w+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isUltrareviewCommand(text: string): boolean {
+  return /^\/ultrareview(?:@\w+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isHelpCommand(text: string): boolean {
+  return /^\/help(?:@\w+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isUsageCommand(text: string): boolean {
+  return /^\/usage(?:@\w+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isStatusCommand(text: string): boolean {
+  return /^\/status(?:@\w+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isDetachCommand(text: string): boolean {
+  return /^\/detach(?:@\w+)?(?:\s|$)/i.test(text.trim());
+}
+
 // Queue for group chat messages to prevent concurrent turns on same session
 const groupChatQueue = new ChatQueue();
 
@@ -239,6 +272,80 @@ export class Bridge {
   }
 
   /**
+   * Handle group chat commands that need to go to engine
+   */
+  private async handleGroupCommand(
+    input: GroupMessageInput & {
+      onProgress?: (partialText: string) => void;
+      onProgressState?: ProgressCallback;
+      onAsyncMessage?: (text: string) => void;
+      requestOutputDir?: string;
+      workspaceOverride?: string;
+      abortSignal?: AbortSignal;
+      locale?: Locale;
+      sendMessage?: (chatId: number, text: string) => Promise<void>;
+    },
+    command: string,
+  ): Promise<{ text: string; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number } }> {
+    return groupChatQueue.enqueue(input.chatId, async () => {
+      const session = await this.sessionManager.getOrCreateSession(input.chatId);
+
+      if (input.sendMessage && command === "/compact") {
+        const compactMsg = input.locale === "zh" ? "正在压缩会话上下文..." : "Compacting session context...";
+        await input.sendMessage(input.chatId, compactMsg);
+      }
+
+      const instructions = combineInstructions(
+        renderTelegramBridgeCapabilities(),
+        this.bridgeInstructionMode === "telegram-out-only" && input.requestOutputDir
+          ? renderCodexTelegramOutInstructions(input.requestOutputDir)
+          : undefined,
+      );
+
+      try {
+        const response = await this.adapter.sendUserMessage(session.sessionId, {
+          text: command,
+          files: [],
+          instructions,
+          onProgress: input.onProgress,
+          onProgressState: input.onProgressState,
+          onAsyncMessage: input.onAsyncMessage,
+          requestOutputDir: input.requestOutputDir,
+          workspaceOverride: input.workspaceOverride,
+          abortSignal: input.abortSignal,
+        });
+
+        if (response.sessionId && response.sessionId !== session.sessionId) {
+          await this.sessionManager.bindSession(input.chatId, response.sessionId);
+        }
+
+        return {
+          text: response.text,
+          usage: response.usage
+            ? {
+                inputTokens: response.usage.inputTokens,
+                outputTokens: response.usage.outputTokens,
+                cacheReadTokens: response.usage.cacheReadTokens,
+                cacheCreationTokens: response.usage.cacheCreationTokens,
+              }
+            : undefined,
+        };
+      } catch (error) {
+        // Fallback: if compact fails, reset session (same effect)
+        if (command === "/compact") {
+          const newSessionId = `group-${input.chatId}-${Date.now()}`;
+          await this.sessionManager.bindSession(input.chatId, newSessionId);
+          const fallbackMsg = input.locale === "zh"
+            ? "引擎不支持 compact，已重置会话（效果相同）。"
+            : "Engine does not support compact. Session reset instead (same effect).";
+          return { text: fallbackMsg };
+        }
+        throw error;
+      }
+    });
+  }
+
+  /**
    * Handle group chat messages
    * Creates/uses persistent session for the group chat
    */
@@ -250,8 +357,81 @@ export class Bridge {
       requestOutputDir?: string;
       workspaceOverride?: string;
       abortSignal?: AbortSignal;
+      locale?: Locale;
+      sendMessage?: (chatId: number, text: string) => Promise<void>;
+      stateDir?: string;
     }
   ): Promise<{ text: string; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number } }> {
+    // Check for command patterns in group chat
+    const taskContent = input.taskContent.trim();
+
+    // Handle /reset command
+    if (isResetCommand(taskContent)) {
+      const session = await this.sessionManager.getOrCreateSession(input.chatId);
+      // Reset by binding to a new session
+      const newSessionId = `group-${input.chatId}-${Date.now()}`;
+      await this.sessionManager.bindSession(input.chatId, newSessionId);
+      const msg = input.locale === "zh" ? "会话已重置。" : "Session reset.";
+      if (input.sendMessage) {
+        await input.sendMessage(input.chatId, msg);
+      }
+      return { text: msg };
+    }
+
+    // Handle /compact command - forward to engine
+    if (isCompactCommand(taskContent)) {
+      return this.handleGroupCommand(input, "/compact");
+    }
+
+    // Handle /context command - forward to engine
+    if (isContextCommand(taskContent)) {
+      return this.handleGroupCommand(input, "/context");
+    }
+
+    // Handle /ultrareview command - forward to engine
+    if (isUltrareviewCommand(taskContent)) {
+      return this.handleGroupCommand(input, "/ultrareview");
+    }
+
+    // Handle /help command
+    if (isHelpCommand(taskContent)) {
+      const helpText = [
+        "Available commands:",
+        "/reset - Reset conversation session",
+        "/compact - Compress session context",
+        "/context - Show context fill level (Claude only)",
+        "/ultrareview - Run code review (Claude Opus 4.7+)",
+        "/status - Show session status",
+        "/usage - Show token & cost usage",
+        "/detach - Detach resumed session",
+        "/help - Show this help",
+      ].join("\n");
+      if (input.sendMessage) {
+        await input.sendMessage(input.chatId, helpText);
+      }
+      return { text: helpText };
+    }
+
+    // Handle /usage command - forward to engine
+    if (isUsageCommand(taskContent)) {
+      return this.handleGroupCommand(input, "/usage");
+    }
+
+    // Handle /status command
+    if (isStatusCommand(taskContent)) {
+      const session = await this.sessionManager.getOrCreateSession(input.chatId);
+      const statusText = `Session: ${session.sessionId}`;
+      if (input.sendMessage) {
+        await input.sendMessage(input.chatId, statusText);
+      }
+      return { text: statusText };
+    }
+
+    // Handle /detach command - forward to engine
+    if (isDetachCommand(taskContent)) {
+      return this.handleGroupCommand(input, "/detach");
+    }
+
     // Queue group messages per chat to prevent concurrent turns on same session
     return groupChatQueue.enqueue(input.chatId, async () => {
       // Group chats bypass access control (anyone in the group can interact)

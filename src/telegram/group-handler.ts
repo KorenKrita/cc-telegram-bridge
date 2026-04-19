@@ -169,6 +169,11 @@ export class GroupHandler {
 
     // Priority 2: Check if replying to this bot
     if (this.isReplyToMe(message)) {
+      // If message @mentions another bot, prioritize the explicit mention
+      // even when replying to this bot's message
+      if (this.isMentioningOtherBot(text)) {
+        return null;
+      }
       return {
         isMentioned: false,
         isReply: true,
@@ -191,6 +196,24 @@ export class GroupHandler {
 
     // Check if the replied message is from this bot
     return replyTo.from.id === this.state.botId;
+  }
+
+  /**
+   * Check if message @mentions any bot other than this bot
+   * Pattern: @xxx_bot where xxx_bot is not the current bot's username
+   */
+  private isMentioningOtherBot(text: string): boolean {
+    const currentUsername = this.state.botUsername?.toLowerCase();
+    // Match @botname pattern (bot usernames end with "_bot" in Telegram)
+    const botMentionPattern = /@(\w+_bot)(?!\w)/gi;
+    let match;
+    while ((match = botMentionPattern.exec(text)) !== null) {
+      const mentionedBot = match[1].toLowerCase();
+      if (mentionedBot !== currentUsername) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

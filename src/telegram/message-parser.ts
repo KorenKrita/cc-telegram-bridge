@@ -53,10 +53,20 @@ export class MessageParser {
       return null;
     }
 
-    // Extract replied message content if available
+    // Extract replied message content and sender if available
     let repliedMessageContent: string | undefined;
-    if (message.reply_to_message?.text) {
-      repliedMessageContent = message.reply_to_message.text;
+    let repliedMessageFrom: GroupMessageInput['repliedMessageFrom'] | undefined;
+    if (message.reply_to_message) {
+      if (message.reply_to_message.text) {
+        repliedMessageContent = message.reply_to_message.text;
+      }
+      if (message.reply_to_message.from) {
+        repliedMessageFrom = {
+          type: this.determineSource(message.reply_to_message.from),
+          id: message.reply_to_message.from.id,
+          username: message.reply_to_message.from.username,
+        };
+      }
     }
 
     return {
@@ -72,6 +82,7 @@ export class MessageParser {
       chatId: message.chat.id,
       replyToMessageId: message.reply_to_message?.message_id,
       repliedMessageContent,
+      repliedMessageFrom,
       timestamp: message.date,
       routing: {
         isMentioned: routing.isMentioned,
@@ -157,12 +168,14 @@ export class MessageParser {
 
   /**
    * Check if text contains mention of this bot
+   * Uses word boundary to avoid partial matches (e.g., @Bot matching @BotName)
    */
   isMentioned(text: string): boolean {
-    const usernameWithAt = this.botUsername.startsWith("@")
-      ? this.botUsername
-      : `@${this.botUsername}`;
-
-    return text.includes(usernameWithAt);
+    const usernameWithoutAt = this.botUsername.startsWith("@")
+      ? this.botUsername.slice(1)
+      : this.botUsername;
+    // Use word boundary to ensure exact match: @BotName followed by space, newline, or end of string
+    const pattern = new RegExp(`@${usernameWithoutAt}(?:\\s|$)`);
+    return pattern.test(text);
   }
 }

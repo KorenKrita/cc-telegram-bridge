@@ -56,6 +56,12 @@ export interface GroupMessageInput {
    * No additional API call needed
    */
   repliedMessageContent?: string;
+  /** Sender of the replied message (for context) */
+  repliedMessageFrom?: {
+    type: 'user' | 'bot';
+    id: number;
+    username?: string;
+  };
   timestamp: number;
   routing: {
     isMentioned: boolean;

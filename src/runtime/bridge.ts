@@ -229,7 +229,7 @@ export class Bridge {
       workspaceOverride?: string;
       abortSignal?: AbortSignal;
     }
-  ): Promise<{ text: string; usage?: { inputTokens: number; outputTokens: number } }> {
+  ): Promise<{ text: string; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number } }> {
     // Group chats bypass access control (anyone in the group can interact)
     const session = await this.sessionManager.getOrCreateSession(input.chatId);
 
@@ -238,7 +238,14 @@ export class Bridge {
 
     // Add replied message context if available
     if (input.replyToMessageId && input.repliedMessageContent) {
-      text = `${text}\n\n[Reply to message #${input.replyToMessageId}]\n${input.repliedMessageContent}`;
+      const repliedSender = input.repliedMessageFrom?.username
+        ? `@${input.repliedMessageFrom.username}`
+        : input.repliedMessageFrom?.type === 'bot'
+          ? `Bot(${input.repliedMessageFrom.id})`
+          : input.repliedMessageFrom
+            ? `User(${input.repliedMessageFrom.id})`
+            : 'Unknown';
+      text = `${text}\n\n[Reply to ${repliedSender}'s message #${input.replyToMessageId}]\n${input.repliedMessageContent}`;
     }
 
     // Add user/bot context for better understanding
@@ -285,6 +292,8 @@ export class Bridge {
         ? {
             inputTokens: response.usage.inputTokens,
             outputTokens: response.usage.outputTokens,
+            cacheReadTokens: response.usage.cacheReadTokens,
+            cacheCreationTokens: response.usage.cacheCreationTokens,
           }
         : undefined,
     };

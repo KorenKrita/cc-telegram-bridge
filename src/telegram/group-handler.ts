@@ -185,12 +185,17 @@ export class GroupHandler {
       return;
     }
 
-    // Check allowed chat IDs if configured
-    if (
-      this.options.allowedChatIds &&
-      this.options.allowedChatIds.length > 0 &&
-      !this.options.allowedChatIds.includes(message.chat.id)
-    ) {
+    // Check allowed chat IDs (must be explicitly configured)
+    if (!this.options.allowedChatIds || this.options.allowedChatIds.length === 0) {
+      console.warn(
+        `[GroupHandler] Rejected message from chat ${message.chat.id}: allowedChatIds not configured`
+      );
+      return;
+    }
+    if (!this.options.allowedChatIds.includes(message.chat.id)) {
+      console.warn(
+        `[GroupHandler] Rejected message from chat ${message.chat.id}: not in allowedChatIds list`
+      );
       return;
     }
 
@@ -233,7 +238,12 @@ export class GroupHandler {
     const text = message.text ?? "";
 
     // Priority 1: Check if bot is mentioned
-    if (this.parser?.isMentioned(text)) {
+    // Parser must be initialized (after start() resolves bot identity)
+    if (!this.parser) {
+      console.warn("[GroupHandler] Parser not initialized, skipping message");
+      return null;
+    }
+    if (this.parser.isMentioned(text)) {
       return { isMentioned: true, isReply: false };
     }
 

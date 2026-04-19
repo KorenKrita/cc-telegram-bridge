@@ -14,6 +14,7 @@ import { createBusTalkHandler } from "./bus/bus-handler.js";
 import { pruneStaleInstances, registerInstance, deregisterInstance, resolveChannelRoot } from "./bus/bus-registry.js";
 import { UsageStore } from "./state/usage-store.js";
 import { GroupHandler } from "./telegram/group-handler.js";
+import { chunkTelegramMessage } from "./telegram/message-renderer.js";
 import { loadInstanceConfig } from "./telegram/instance-config.js";
 import type { GroupMessageInput } from "./telegram/types.js";
 
@@ -137,8 +138,11 @@ async function main(): Promise<void> {
           // Send the response back to the group chat
           try {
             console.log(`[GroupHandler] Sending response to chat ${input.chatId}, text length: ${response.text.length}`);
-            await api.sendMessage(input.chatId, response.text);
-            console.log(`[GroupHandler] Response sent successfully to chat ${input.chatId}`);
+            const chunks = chunkTelegramMessage(response.text);
+            for (const chunk of chunks) {
+              await api.sendMessage(input.chatId, chunk);
+            }
+            console.log(`[GroupHandler] Response sent successfully to chat ${input.chatId} (${chunks.length} chunk(s))`);
 
             if (response.usage) {
               console.log(`[GroupHandler] Usage: inputTokens=${response.usage.inputTokens}, outputTokens=${response.usage.outputTokens}`);

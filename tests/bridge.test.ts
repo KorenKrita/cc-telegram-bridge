@@ -22,6 +22,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn().mockResolvedValue({ text: "done" }),
@@ -69,6 +70,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn(),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn(),
@@ -99,6 +101,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn(),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn(),
@@ -144,6 +147,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn(),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn(),
@@ -185,6 +189,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn(),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn(),
@@ -236,6 +241,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn().mockResolvedValue({ text: "done" }),
@@ -266,6 +272,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn(),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn(),
@@ -287,6 +294,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn(),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn(),
@@ -316,6 +324,7 @@ describe("Bridge", () => {
       const sessionManager: SessionManagerLike = {
         getOrCreateSession: vi.fn(),
         bindSession: vi.fn(),
+      removeSession: vi.fn(),
       };
       const adapter: CodexAdapter = {
         sendUserMessage: vi.fn(),
@@ -353,6 +362,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
       bindSession: vi.fn().mockResolvedValue(undefined),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn().mockResolvedValue({ text: "done", sessionId: "thread-123" }),
@@ -386,6 +396,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn(),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn(),
@@ -418,6 +429,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn(),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn(),
@@ -464,6 +476,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn().mockResolvedValue({ text: "done" }),
@@ -507,6 +520,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       sendUserMessage: vi.fn().mockResolvedValue({ text: "done" }),
@@ -550,6 +564,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       bridgeInstructionMode: "telegram-out-only",
@@ -594,6 +609,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       bridgeInstructionMode: "telegram-out-only",
@@ -633,6 +649,7 @@ describe("Bridge", () => {
     const sessionManager: SessionManagerLike = {
       getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
       bindSession: vi.fn(),
+      removeSession: vi.fn(),
     };
     const adapter: CodexAdapter = {
       bridgeInstructionMode: "telegram-out-only",

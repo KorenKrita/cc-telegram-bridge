@@ -66,6 +66,7 @@ export interface AccessStoreLike {
 export interface SessionManagerLike {
   getOrCreateSession(chatId: number): Promise<{ sessionId: string }>;
   bindSession(chatId: number, sessionId: string): Promise<void>;
+  removeSession(chatId: number): Promise<boolean>;
 }
 
 export interface BridgeAccessInput {
@@ -333,8 +334,7 @@ export class Bridge {
       } catch (error) {
         // Fallback: if compact fails, reset session (same effect)
         if (command === "/compact") {
-          const newSessionId = `group-${input.chatId}-${Date.now()}`;
-          await this.sessionManager.bindSession(input.chatId, newSessionId);
+          await this.sessionManager.removeSession(input.chatId);
           const fallbackMsg = input.locale === "zh"
             ? "引擎不支持 compact，已重置会话（效果相同）。"
             : "Engine does not support compact. Session reset instead (same effect).";
@@ -367,14 +367,9 @@ export class Bridge {
 
     // Handle /reset command
     if (isResetCommand(taskContent)) {
-      const session = await this.sessionManager.getOrCreateSession(input.chatId);
-      // Reset by binding to a new session
-      const newSessionId = `group-${input.chatId}-${Date.now()}`;
-      await this.sessionManager.bindSession(input.chatId, newSessionId);
+      // Remove session record so next message creates a fresh session (no --resume)
+      await this.sessionManager.removeSession(input.chatId);
       const msg = input.locale === "zh" ? "会话已重置。" : "Session reset.";
-      if (input.sendMessage) {
-        await input.sendMessage(input.chatId, msg);
-      }
       return { text: msg };
     }
 
@@ -406,9 +401,6 @@ export class Bridge {
         "/detach - Detach resumed session",
         "/help - Show this help",
       ].join("\n");
-      if (input.sendMessage) {
-        await input.sendMessage(input.chatId, helpText);
-      }
       return { text: helpText };
     }
 
@@ -421,9 +413,6 @@ export class Bridge {
     if (isStatusCommand(taskContent)) {
       const session = await this.sessionManager.getOrCreateSession(input.chatId);
       const statusText = `Session: ${session.sessionId}`;
-      if (input.sendMessage) {
-        await input.sendMessage(input.chatId, statusText);
-      }
       return { text: statusText };
     }
 

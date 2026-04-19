@@ -49,4 +49,8 @@ export class SessionManager {
       suspendedPrevious: existing?.suspendedPrevious,
     });
   }
+
+  async removeSession(chatId: number): Promise<boolean> {
+    return this.sessionStore.removeByChatId(chatId);
+  }
 }

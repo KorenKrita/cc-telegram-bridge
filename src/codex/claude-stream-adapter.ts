@@ -109,6 +109,8 @@ type ClaudeStreamEvent = {
   hook_event?: string;
   result?: string;
   is_error?: boolean;
+  stop_reason?: string;
+  errors?: unknown[];
   message?: {
     content?: ContentBlock[];
   };
@@ -603,7 +605,10 @@ export class ClaudeStreamAdapter implements CodexAdapter {
       }
 
       if (parsed.is_error) {
-        pending.reject(new Error((parsed.result ?? pending.assistantText ?? "Claude reported an error").trim()));
+        const errorsDetail = parsed.errors ? JSON.stringify(parsed.errors) : undefined;
+        const errorDetail = (parsed.result ?? errorsDetail ?? pending.assistantText ?? "Claude reported an error").trim();
+        console.error(`[ClaudeStreamAdapter] Engine error result: is_error=true, result=${JSON.stringify(parsed.result)?.slice(0, 500)}, errors=${errorsDetail?.slice(0, 500)}, assistantText=${JSON.stringify(pending.assistantText)?.slice(0, 200)}, stop_reason=${parsed.stop_reason}, subtype=${parsed.subtype}`);
+        pending.reject(new Error(errorDetail || "Claude reported an error"));
         return;
       }
       pending.resolve({

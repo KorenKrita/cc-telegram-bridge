@@ -97,87 +97,53 @@ export class GroupHandler {
    * Process a single update (called by main polling loop)
    */
   async processUpdate(update: TelegramUpdate): Promise<void> {
-    console.log(`[GroupHandler] ====== processUpdate START ======`);
-    console.log(`[GroupHandler] update_id: ${update.update_id}`);
-    console.log(`[GroupHandler] has message: ${!!update.message}, has edited_message: ${!!update.edited_message}`);
-
     const message = update.message ?? update.edited_message;
     if (!message) {
-      console.log(`[GroupHandler] ❌ SKIPPED: no message in update ${update.update_id}`);
-      console.log(`[GroupHandler] ====== processUpdate END ======`);
       return;
     }
-
-    // Log full message structure for debugging
-    console.log(`[GroupHandler] Message structure:`);
-    console.log(`  - message_id: ${message.message_id}`);
-    console.log(`  - from: ${message.from ? `id=${message.from.id}, username=${message.from.username}, is_bot=${message.from.is_bot}` : 'null'}`);
-    console.log(`  - chat: id=${message.chat.id}, type=${message.chat.type}, title=${message.chat.title || '(no title)'}`);
-    console.log(`  - text: "${message.text || '(no text)'}"`);
-    console.log(`  - reply_to_message: ${message.reply_to_message ? `yes (from=${message.reply_to_message.from?.id})` : 'no'}`);
 
     // Only process group/supergroup messages
     if (message.chat.type !== "group" && message.chat.type !== "supergroup") {
-      console.log(`[GroupHandler] ❌ SKIPPED: chat type is ${message.chat.type} (expected group/supergroup)`);
-      console.log(`[GroupHandler] ====== processUpdate END ======`);
       return;
     }
 
-    console.log(`[GroupHandler] ✅ Chat type OK: ${message.chat.type}`);
-
     // Check allowed chat IDs (must be explicitly configured)
-    console.log(`[GroupHandler] allowedChatIds config: ${JSON.stringify(this.options.allowedChatIds)}`);
     if (!this.options.allowedChatIds || this.options.allowedChatIds.length === 0) {
       console.warn(
-        `[GroupHandler] ❌ REJECTED: allowedChatIds not configured (empty or missing)`
+        `[GroupHandler] Rejected message from chat ${message.chat.id}: allowedChatIds not configured`
       );
-      console.log(`[GroupHandler] ====== processUpdate END ======`);
       return;
     }
     if (!this.options.allowedChatIds.includes(message.chat.id)) {
       console.warn(
-        `[GroupHandler] ❌ REJECTED: chat ${message.chat.id} not in allowedChatIds list ${JSON.stringify(this.options.allowedChatIds)}`
+        `[GroupHandler] Rejected message from chat ${message.chat.id}: not in allowedChatIds list`
       );
-      console.log(`[GroupHandler] ====== processUpdate END ======`);
       return;
     }
-    console.log(`[GroupHandler] ✅ Chat ID ${message.chat.id} is allowed`);
 
     // Determine routing
-    console.log(`[GroupHandler] Checking routing...`);
     const routing = this.shouldRoute(message);
     if (!routing) {
-      console.log(`[GroupHandler] ❌ NOT ROUTING: message not targeted at this bot`);
-      console.log(`[GroupHandler] ====== processUpdate END ======`);
       return;
     }
-    console.log(`[GroupHandler] ✅ Routing decision: isMentioned=${routing.isMentioned}, isReply=${routing.isReply}`);
 
     // Parse the message
     if (!this.parser) {
-      console.error("[GroupHandler] ❌ ERROR: Parser not initialized (bot identity not resolved?)");
-      console.log(`[GroupHandler] ====== processUpdate END ======`);
+      console.error("[GroupHandler] Parser not initialized");
       return;
     }
-    console.log(`[GroupHandler] Parser initialized, botUsername=${this.state.botUsername}`);
 
     const parsed = this.parser.parse(message, routing);
     if (!parsed) {
-      console.log(`[GroupHandler] ❌ PARSED: empty or invalid content`);
-      console.log(`[GroupHandler] ====== processUpdate END ======`);
       return;
     }
-    console.log(`[GroupHandler] ✅ Parsed: taskContent="${parsed.taskContent.slice(0, 50)}..."`);
 
     // Deliver to handler
-    console.log(`[GroupHandler] Calling onMessage handler...`);
     try {
       await this.options.onMessage(parsed);
-      console.log(`[GroupHandler] ✅ onMessage handler completed`);
     } catch (error) {
-      console.error("[GroupHandler] ❌ onMessage handler error:", error);
+      console.error("[GroupHandler] onMessage handler error:", error);
     }
-    console.log(`[GroupHandler] ====== processUpdate END ======`);
   }
 
   /**
@@ -190,7 +156,6 @@ export class GroupHandler {
    */
   private shouldRoute(message: TelegramMessage): RoutingContext | null {
     const text = message.text ?? "";
-    console.log(`[GroupHandler] shouldRoute: text="${text.slice(0, 80)}", parser=${this.parser ? 'ok' : 'null'}`);
 
     // Priority 1: Check if bot is mentioned
     // Parser must be initialized (after start() resolves bot identity)
@@ -198,9 +163,7 @@ export class GroupHandler {
       console.warn("[GroupHandler] Parser not initialized, skipping message");
       return null;
     }
-    const isMentioned = this.parser.isMentioned(text);
-    console.log(`[GroupHandler] isMentioned: ${isMentioned}, botUsername: ${this.state.botUsername}`);
-    if (isMentioned) {
+    if (this.parser.isMentioned(text)) {
       return { isMentioned: true, isReply: false };
     }
 

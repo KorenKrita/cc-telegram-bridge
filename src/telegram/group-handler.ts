@@ -163,7 +163,8 @@ export class GroupHandler {
       console.warn("[GroupHandler] Parser not initialized, skipping message");
       return null;
     }
-    if (this.parser.isMentioned(text)) {
+    // Check both text-based and entity-based mentions
+    if (this.parser.isMentioned(text) || this.parser.isMentionedInEntities(message)) {
       return { isMentioned: true, isReply: false };
     }
 

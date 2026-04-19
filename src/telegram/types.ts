@@ -20,12 +20,20 @@ export interface TelegramChat {
   username?: string;
 }
 
+export interface TelegramMessageEntity {
+  type: string;
+  offset: number;
+  length: number;
+  user?: TelegramUser; // for text_mention type
+}
+
 export interface TelegramMessage {
   message_id: number;
   chat: TelegramChat;
   from: TelegramUser;
   text?: string;
   date: number; // Unix timestamp
+  entities?: TelegramMessageEntity[];
   reply_to_message?: {
     message_id: number;
     from?: TelegramUser;

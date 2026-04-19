@@ -37,9 +37,16 @@ export class MessageParser {
 
     if (routing.isMentioned) {
       // Handle @mention
-      const extracted = this.extractMentionedContent(rawText, sourceType);
-      taskContent = extracted.taskContent;
-      userContent = extracted.userContent;
+      // Check if this is an entity-based mention first
+      if (this.isMentionedInEntities(message)) {
+        const extracted = this.extractEntityMentionedContent(message, sourceType);
+        taskContent = extracted.taskContent;
+        userContent = extracted.userContent;
+      } else {
+        const extracted = this.extractMentionedContent(rawText, sourceType);
+        taskContent = extracted.taskContent;
+        userContent = extracted.userContent;
+      }
     } else if (routing.isReply) {
       // Handle reply
       taskContent = rawText.trim();
@@ -147,14 +154,66 @@ export class MessageParser {
       return { taskContent: text.trim() };
     }
 
+    return this.sliceContent(text, mentionIndex + matchedPattern.length, sourceType);
+  }
+
+  /**
+   * Extract content when bot is mentioned via Telegram entities
+   * Handles mentions from autocomplete which use entity format
+   */
+  private extractEntityMentionedContent(
+    message: { text?: string; entities?: Array<{ type: string; offset: number; length: number; user?: { username?: string } }> },
+    sourceType: "user" | "bot"
+  ): { userContent?: string; taskContent: string } {
+    if (!message.text || !message.entities) {
+      return { taskContent: message.text?.trim() ?? "" };
+    }
+
+    const usernameWithoutAt = this.botUsername.startsWith("@")
+      ? this.botUsername.slice(1)
+      : this.botUsername;
+
+    // Find the mention entity for this bot
+    for (const entity of message.entities) {
+      if (entity.type === "mention") {
+        const mentionText = message.text.slice(entity.offset, entity.offset + entity.length);
+        if (mentionText.toLowerCase() === `@${usernameWithoutAt}`.toLowerCase()) {
+          // Found the mention, extract content after it
+          const endOfMention = entity.offset + entity.length;
+          return this.sliceContent(message.text, endOfMention, sourceType);
+        }
+      }
+      if (entity.type === "text_mention" && entity.user?.username) {
+        if (entity.user.username.toLowerCase() === usernameWithoutAt.toLowerCase()) {
+          // Found text_mention for this bot
+          const endOfMention = entity.offset + entity.length;
+          return this.sliceContent(message.text, endOfMention, sourceType);
+        }
+      }
+    }
+
+    // Fallback: return full text if mention not found in entities
+    return { taskContent: message.text.trim() };
+  }
+
+  /**
+   * Slice content from a position based on source type
+   */
+  private sliceContent(
+    text: string,
+    startIndex: number,
+    sourceType: "user" | "bot"
+  ): { userContent?: string; taskContent: string } {
     if (sourceType === "user") {
       // From user: extract everything after @BotName
-      const afterMention = text.slice(mentionIndex + matchedPattern.length);
+      const afterMention = text.slice(startIndex);
       return { taskContent: afterMention.trim() };
     } else {
       // From bot: split into userContent and taskContent
-      const beforeMention = text.slice(0, mentionIndex).trim();
-      const afterMention = text.slice(mentionIndex + matchedPattern.length).trim();
+      // Find the position where mention starts (for bot messages with @Bot in middle)
+      const mentionStart = text.slice(0, startIndex).lastIndexOf("@");
+      const beforeMention = mentionStart > 0 ? text.slice(0, mentionStart).trim() : "";
+      const afterMention = text.slice(startIndex).trim();
 
       // Remove trailing newlines from userContent
       const cleanUserContent = beforeMention.replace(/\n+$/, "");
@@ -177,5 +236,37 @@ export class MessageParser {
     // Use negative lookahead: match @BotName as long as it's not followed by a word character
     const pattern = new RegExp(`@${usernameWithoutAt}(?!\\w)`);
     return pattern.test(text);
+  }
+
+  /**
+   * Check if message entities contain mention of this bot
+   * Handles Telegram entity-based mentions (from autocomplete)
+   */
+  isMentionedInEntities(message: { text?: string; entities?: Array<{ type: string; offset: number; length: number; user?: { username?: string } }> }): boolean {
+    if (!message.entities || !message.text) {
+      return false;
+    }
+
+    const usernameWithoutAt = this.botUsername.startsWith("@")
+      ? this.botUsername.slice(1)
+      : this.botUsername;
+
+    for (const entity of message.entities) {
+      // Check mention entity type
+      if (entity.type === "mention") {
+        const mentionText = message.text.slice(entity.offset, entity.offset + entity.length);
+        if (mentionText.toLowerCase() === `@${usernameWithoutAt}`.toLowerCase()) {
+          return true;
+        }
+      }
+      // Check text_mention entity type (mention without username)
+      if (entity.type === "text_mention" && entity.user?.username) {
+        if (entity.user.username.toLowerCase() === usernameWithoutAt.toLowerCase()) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 }

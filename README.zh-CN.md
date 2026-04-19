@@ -37,7 +37,8 @@
 - bot 协作能力现在包括 `/ask`、`/fan`、`/chain`、`/verify`，以及 coordinator 主导的 `crew` workflow。
 - 运行状态除了 `audit.log.jsonl`，还会写结构化 `timeline.log.jsonl` 和 `crew-runs/*.json`。
 - `telegram service status`、`telegram service doctor`、`telegram timeline`、`telegram dashboard` 现在能看见更多运行细节。
-- **v4.1.0** — 新增 coordinator 主导的 `crew` 持久化 run 状态、macOS `launchd` 自启动管理（`telegram autostart ...`），并补了一轮 state/runtime 边界加固，包括 schema 兼容、文件投递和共享状态写入。
+- **v4.2.0** — 新增 Claude 认证 smoke 检查、更强的 service 环境诊断，以及移除旧 autostart 之后对残留 legacy launchd plist 的清理指引。
+- **v4.1.0** — 新增 coordinator 主导的 `crew` 持久化 run 状态，并补了一轮 state/runtime 边界加固，包括 schema 兼容、文件投递和共享状态写入。
 - **v4.0.0** — 内部 bus 正式走 `v1` 协议（兼容老报文）：带 `protocolVersion`、`capabilities`、结构化 `errorCode` 和 `retryable` 标志。详见 [`docs/bus-protocol.md`](./docs/bus-protocol.md)。
 - Peer 活性改为 `GET /api/health` 探活 + `cc-telegram-bridge` 指纹校验，端口被别的进程占用时不会再被误判成活着。
 - 所有状态文件都走 zod 校验 + 原子写（先写临时文件再 rename）；`UsageStore` 写入串行化，并发 turn 不再丢 usage。
@@ -729,7 +730,7 @@ Telegram 消息 → 标准化 → 访问检查 → 聊天队列（串行）
 | `telegram service status` | 运行状态、PID、引擎、bot 身份、timeline 摘要、最近 crew run |
 | `telegram service restart` | 停止 + 启动，干净重置 |
 | `telegram service logs` | 查看 stdout/stderr 日志 |
-| `telegram service doctor` | 全子系统健康检查，包括 timeline 和 crew 状态 |
+| `telegram service doctor` | 全子系统健康检查，包括 timeline、crew、共享引擎环境和残留 launchd 项 |
 | `telegram engine [codex\|claude]` | 按实例切换 AI 引擎 |
 | `telegram yolo [on\|off\|unsafe]` | 切换自动审批模式 |
 | `telegram usage` | 查看 token 用量和费用估算 |
@@ -801,6 +802,24 @@ Telegram 用户也可以使用：
 ./scripts/status-instance.sh [work]
 ./scripts/stop-instance.sh [work]
 ```
+
+旧版 autostart 遗留清理：
+
+```bash
+bash scripts/cleanup-legacy-launchd.sh --all
+```
+
+Claude 认证 smoke test：
+
+```bash
+npm run smoke:claude-auth
+```
+
+共享引擎环境规则：
+
+- `CLAUDE_CONFIG_DIR` 和 `CODEX_HOME` 只有在你显式 export 时才会传给 bot。
+- 如果你改了其中任意一个变量，要从同一个 shell 重启对应实例。
+- `telegram service doctor` 现在会检查共享环境是否漂移，以及是否还残留旧的 launchd plist。
 
 ---
 
@@ -909,6 +928,21 @@ docker run -v ~/.cctb:/root/.cctb cc-telegram-bridge telegram service start
 1. 运行 `telegram service doctor` 诊断
 2. 查看 `telegram service logs` 的错误
 3. 确认引擎已安装：`codex --version` 或 `claude --version`
+4. 如果是 Claude 实例，运行 `npm run smoke:claude-auth`
+5. 如果 `service doctor` 报 `legacy-launchd`，运行 `bash scripts/cleanup-legacy-launchd.sh --all`
+
+</details>
+
+<details>
+<summary><strong>Terminal 里的 Claude 正常，但 bot 里不正常</strong></summary>
+
+1. 先检查 shell：`claude auth status`
+2. 运行 `npm run smoke:claude-auth`
+3. 再跑 `telegram service doctor --instance <name>`
+4. 如果你刚改过 `CLAUDE_CONFIG_DIR`，请从同一个 shell 里重启实例
+5. 如果 `doctor` 报 `legacy-launchd`，执行 `bash scripts/cleanup-legacy-launchd.sh --all`
+
+详细说明见：[`docs/runtime-env-troubleshooting.md`](./docs/runtime-env-troubleshooting.md)
 
 </details>
 

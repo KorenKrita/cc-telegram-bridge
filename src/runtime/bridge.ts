@@ -3,6 +3,7 @@ import {
   type Locale,
   renderPairingMessage,
   renderPrivateChatRequiredMessage,
+  renderSingleChatLockedMessage,
   renderUnauthorizedMessage,
 } from "../telegram/message-renderer.js";
 import type { GroupMessageInput } from "../telegram/types.js";
@@ -46,6 +47,7 @@ const groupChatQueue = new ChatQueue();
 
 export interface AccessStoreLike {
   load(): Promise<{
+    multiChat: boolean;
     policy: "pairing" | "allowlist";
     allowlist: number[];
     pendingPairs: unknown[];
@@ -79,6 +81,24 @@ export interface BridgeAccessInput {
 export interface BridgeAccessDecision {
   kind: "allow" | "reply" | "deny";
   text?: string;
+}
+
+function findConflictingAuthorizedChatId(
+  accessState: Awaited<ReturnType<AccessStoreLike["load"]>>,
+  chatId: number,
+): number | null {
+  if (accessState.multiChat) {
+    return null;
+  }
+
+  const authorizedChatIds = new Set<number>([
+    ...accessState.allowlist,
+    ...accessState.pairedUsers.map((user) => user.telegramChatId),
+  ]);
+  authorizedChatIds.delete(chatId);
+
+  const conflict = authorizedChatIds.values().next();
+  return conflict.done ? null : conflict.value;
 }
 
 function renderTelegramBridgeCapabilities(): string {
@@ -186,10 +206,15 @@ export class Bridge {
       };
     }
 
+    const conflictingChatId = findConflictingAuthorizedChatId(accessState, input.chatId);
+
     if (accessState.policy === "allowlist" && !accessState.allowlist.includes(input.chatId)) {
       return {
-        kind: "deny",
-        text: renderUnauthorizedMessage(input.locale),
+        kind: conflictingChatId === null ? "deny" : "reply",
+        text:
+          conflictingChatId === null
+            ? renderUnauthorizedMessage(input.locale)
+            : renderSingleChatLockedMessage(input.locale),
       };
     }
 
@@ -199,6 +224,13 @@ export class Bridge {
         (user) => user.telegramChatId === input.chatId && user.telegramUserId === input.userId,
       )
     ) {
+      if (conflictingChatId !== null) {
+        return {
+          kind: "reply",
+          text: renderSingleChatLockedMessage(input.locale),
+        };
+      }
+
       const pendingPair = await this.accessStore.issuePairingCode({
         telegramUserId: input.userId,
         telegramChatId: input.chatId,

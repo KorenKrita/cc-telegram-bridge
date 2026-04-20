@@ -60,7 +60,7 @@ export interface AuthorizedTelegramDispatchContext {
 }
 
 export interface AuthorizedTelegramDispatchDeps {
-  sessionStore: Pick<SessionStore, "findByChatIdSafe" | "inspect" | "removeByChatId" | "upsert">;
+  sessionStore: Pick<SessionStore, "findByChatIdSafe" | "inspect" | "removeByChatId" | "clearAll" | "upsert">;
   turnState: WorkflowAwareTurnState;
   updateInstanceConfig: (updater: (config: Record<string, unknown>) => void) => Promise<void>;
   deliverTelegramResponse: (
@@ -156,12 +156,14 @@ export async function dispatchAuthorizedTelegramMessage(input: {
     locale,
     cfg: {
       engine: cfg.engine,
+      model: cfg.model,
       resume: cfg.resume,
     },
     normalized,
     context,
     bridge: context.bridge,
     sessionStore,
+    updateInstanceConfig,
   })) {
     return;
   }
@@ -171,6 +173,7 @@ export async function dispatchAuthorizedTelegramMessage(input: {
     startedAt,
     locale,
     cfg: {
+      engine: cfg.engine,
       effort: cfg.effort,
       model: cfg.model,
     },

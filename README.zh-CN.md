@@ -37,6 +37,8 @@
 - bot 协作能力现在包括 `/ask`、`/fan`、`/chain`、`/verify`，以及 coordinator 主导的 `crew` workflow。
 - 运行状态除了 `audit.log.jsonl`，还会写结构化 `timeline.log.jsonl` 和 `crew-runs/*.json`。
 - `telegram service status`、`telegram service doctor`、`telegram timeline`、`telegram dashboard` 现在能看见更多运行细节。
+- **v4.3.1** — 单聊模式下如果配对兑换被拦，不再吞掉 pending pairing code；有其他挂起配对时也不能直接关回 multi-chat；并且 service 启动与运行时的配置解析统一走同一个校验读取路径。
+- **v4.3.0** — 默认改为一实例一聊天，新增显式 `telegram access multi on|off` 开关；Codex 在 YOLO 模式下继续走 `app-server`；并支持直接在 Telegram 里用 `/engine` 切换引擎。
 - **v4.2.0** — 新增 Claude 认证 smoke 检查、更强的 service 环境诊断，以及移除旧 autostart 之后对残留 legacy launchd plist 的清理指引。
 - **v4.1.0** — 新增 coordinator 主导的 `crew` 持久化 run 状态，并补了一轮 state/runtime 边界加固，包括 schema 兼容、文件投递和共享状态写入。
 - **v4.0.0** — 内部 bus 正式走 `v1` 协议（兼容老报文）：带 `protocolVersion`、`capabilities`、结构化 `errorCode` 和 `retryable` 标志。详见 [`docs/bus-protocol.md`](./docs/bus-protocol.md)。
@@ -90,7 +92,7 @@ npm run dev -- telegram engine --instance review-bot
 
 ## 多 Bot 部署
 
-想开多少个 bot 就开多少个。每个实例完全隔离 — 独立的引擎、token、人格、线程、访问规则、收件箱和审计日志。
+想开多少个 bot 就开多少个。每个实例完全隔离 — 独立的引擎、token、人格、线程、访问规则、收件箱和审计日志。默认语义仍然是“一实例一个聊天”；多聊天是显式开启的例外模式。
 
 ```
           ┌─────────────────────────────────────────────┐
@@ -317,7 +319,7 @@ Codex 没有和 Claude 一样的本地 session 扫描入口。如果你已经知
 
 这是一种“绑定已有 thread”的流程，不是导入本地 session：thread 仍然在服务端，bridge 只是在当前 chat 上绑定一个已知 thread id。
 
-注意：外部 thread 的验证当前依赖默认的 Codex app-server runtime。如果实例跑在回退的 process runtime（例如某些 yolo/full-auto 进程模式），`/resume thread <thread-id>` 会直接 fail closed，而不是猜测绑定成功。
+注意：外部 thread 的验证当前依赖 Codex app-server runtime。如果某个实例被强制切到 legacy process runtime，`/resume thread <thread-id>` 会直接 fail closed，而不是猜测绑定成功。
 
 ---
 
@@ -759,6 +761,7 @@ Telegram 消息 → 标准化 → 访问检查 → 聊天队列（串行）
 Telegram 用户也可以使用：
 
 - `/status`
+- `/engine [claude|codex]` — 切换当前实例引擎（桥会自动清掉陈旧绑定）
 - `/effort [low|medium|high|xhigh|max|off]` — 设置推理强度（`xhigh` 仅 Opus 4.7+ 可用）
 - `/model [名称|off]` — 切换模型
 - `/btw <问题>` — 旁问（不影响当前会话）
@@ -827,13 +830,23 @@ npm run smoke:claude-auth
 
 按实例分两层：**配对**（初始握手）+ **白名单**（持续授权）。
 
+默认行为现在更保守：
+
+- 一个实例默认只服务 **一个 Telegram chat**
+- 第二个 chat 不会自动配对，也不会被加入 allowlist，除非你显式打开 multi-chat
+- 这样可以减少 `/resume`、workspace override、本地文件和会话状态在不同 chat 之间串掉
+
 ```bash
 npm run dev -- telegram access pair <code>
 npm run dev -- telegram access policy allowlist
 npm run dev -- telegram access allow <chat-id>
 npm run dev -- telegram access revoke <chat-id>
+npm run dev -- telegram access multi on
+npm run dev -- telegram access multi off
 npm run dev -- telegram status [--instance work]
 ```
+
+只有在你真的想让一个实例服务多个聊天时，才使用 `telegram access multi on --instance <name>`。新实例和旧实例在没有显式修改前，默认都保持 `off`。
 
 ---
 
@@ -968,6 +981,70 @@ docker run -v ~/.cctb:/root/.cctb cc-telegram-bridge telegram service start
 不需要重启 — 每条消息都会重新加载。用 `telegram instructions path --instance <name>` 确认路径。
 
 </details>
+
+---
+
+## 可选：配一个本地守护 Agent
+
+这个项目现在已经能稳定使用，但仍然处在持续演进阶段。如果你在一台机器上跑多个实例，额外配一个**本地守护 agent**会很实用。它是可选项，不是必需项。
+
+它适合做这些事：
+- 检查实例健康状态
+- 先看 `service status` / `service doctor` / timeline，再决定要不要动手
+- 只重启出问题的那个实例
+- 先汇报结论和证据，而不是默默改配置
+
+不要把它当成第二个产品 bot。它的职责应该只限于运维：监控、诊断、重启、汇报。
+
+### 示例 Brief
+
+你可以把下面这段去敏感化的 brief 给本地守护 agent：
+
+```text
+你是这台机器上 cc-telegram-bridge 的本地运维守护代理。
+
+你的工作是保持 bot 实例健康，并让问题容易诊断。
+
+核心职责：
+1. 检查实例健康状态
+2. 在采取动作前先诊断
+3. 只在必要时重启受影响的实例
+4. 清楚汇报结论、证据和动作
+
+默认规则：
+- 默认假设一个实例只服务一个 chat，除非该实例明确开启了 multi-chat。
+- 不要擅自修改 engine、model、yolo/approval mode、pairing、access 或 multi-chat，除非用户明确要求。
+- 不要擅自清 task，除非用户明确要求，或任务已确认是残留且用户之前已授权清理。
+- 不要擅自修改项目代码或 README，除非用户明确要求。
+- 优先做最小恢复动作；除非真的必要，不要一上来重启全部实例。
+
+默认诊断顺序：
+1. 看 service status
+2. 看 service doctor
+3. 看最近 timeline / audit
+4. 必要时再看 stdout / stderr
+5. 先判断问题属于：
+   - 进程没跑
+   - engine/runtime 失败
+   - Telegram 投递失败
+   - 残留 task / workflow
+   - 认证或配置问题
+6. 然后再决定是否需要重启
+
+优先使用的命令：
+- `node dist/src/index.js telegram service status --instance <name>`
+- `node dist/src/index.js telegram service doctor --instance <name>`
+- `node dist/src/index.js telegram timeline --instance <name>`
+- `bash scripts/start-instance.sh <name>`
+- `bash scripts/stop-instance.sh <name>`
+
+回复格式：
+- 先给结论
+- 再给证据
+- 最后说明已执行或建议执行的动作
+```
+
+如果你已经在本机使用像 Hermes 这样的 agent，它就很适合承担这个角色。
 
 ---
 

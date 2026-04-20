@@ -37,6 +37,8 @@
 - Agent collaboration now covers `/ask`, `/fan`, `/chain`, `/verify`, and a coordinator-led `crew` workflow.
 - The bridge now keeps structured `timeline.log.jsonl` and `crew-runs/*.json` state for better visibility and recovery.
 - `telegram service status`, `telegram service doctor`, `telegram timeline`, and `telegram dashboard` now expose much richer runtime health.
+- **v4.3.1** — preserves pending pairing codes when single-chat mode blocks redemption, refuses to turn multi-chat off while another chat is still pending pairing, and makes service startup/runtime config parsing use the same validated config reader.
+- **v4.3.0** — makes single-chat-per-instance the default, adds explicit `telegram access multi on|off` control, keeps Codex on `app-server` across YOLO modes, and exposes `/engine` switching directly in Telegram.
 - **v4.2.0** — adds Claude auth smoke checks, stronger service environment diagnostics, and cleanup guidance for stale legacy launchd plists after removing the old autostart path.
 - **v4.1.0** — adds coordinator-led `crew` runs with persisted run state, plus a round of state/runtime hardening around schemas, file delivery, and shared state writes.
 - **v4.0.0** — the bus now speaks a compatibility-first `v1` protocol: protocol versioning, explicit capabilities, structured error codes, and `retryable` flags. See [`docs/bus-protocol.md`](./docs/bus-protocol.md).
@@ -90,7 +92,7 @@ Two layers of instructions, no conflict:
 
 ## Multi-Bot Setup
 
-Run as many bots as you need. Each instance is fully isolated — its own engine, token, personality, threads, access rules, inbox, and audit trail.
+Run as many bots as you need. Each instance is fully isolated — its own engine, token, personality, threads, access rules, inbox, and audit trail. By default, each instance is meant for one Telegram chat; multi-chat access is opt-in.
 
 ```
           ┌─────────────────────────────────────────────┐
@@ -331,7 +333,7 @@ That binds the current Telegram chat to the existing Codex thread. From then on:
 
 This is an attach flow, not a local session import: the thread stays server-side and the bridge only binds the known thread ID to the current chat.
 
-Note: external thread validation currently requires the default Codex app-server runtime. If the instance is running in the fallback process runtime (for example yolo/full-auto process mode), `/resume thread <thread-id>` fails closed instead of guessing.
+Note: external thread validation currently requires the Codex app-server runtime. If an instance is forced onto the legacy process runtime, `/resume thread <thread-id>` fails closed instead of guessing.
 
 ---
 
@@ -775,6 +777,7 @@ All commands accept `--instance <name>` to target a specific bot.
 Telegram users can also use:
 
 - `/status`
+- `/engine [claude|codex]` — switch engine for the current instance (the bridge resets stale bindings automatically)
 - `/effort [low|medium|high|xhigh|max|off]` — set reasoning effort level (`xhigh` is Opus 4.7+ only)
 - `/model [name|off]` — switch model
 - `/btw <question>` — ask a side question without affecting the current session
@@ -843,13 +846,23 @@ Shared engine env rule:
 
 Per-instance, two layers: **pairing** + **allowlist**.
 
+Default behavior is intentionally conservative:
+
+- One instance is locked to **one Telegram chat by default**
+- A second chat will not be paired or allowlisted unless you explicitly enable multi-chat
+- This keeps `/resume`, workspace overrides, local files, and session state from bleeding across chats by accident
+
 ```bash
 npm run dev -- telegram access pair <code>
 npm run dev -- telegram access policy allowlist
 npm run dev -- telegram access allow <chat-id>
 npm run dev -- telegram access revoke <chat-id>
+npm run dev -- telegram access multi on
+npm run dev -- telegram access multi off
 npm run dev -- telegram status [--instance work]
 ```
+
+Use `telegram access multi on --instance <name>` only when you really want one bot instance to serve multiple chats. New and legacy instances both default to `off` unless you explicitly change it.
 
 ---
 
@@ -984,6 +997,70 @@ A 409 Conflict means two processes are polling the same bot token. The service a
 No restart needed — loaded fresh on every message. Verify path with `telegram instructions path --instance <name>`.
 
 </details>
+
+---
+
+## Optional: Run a Local Supervisor Agent
+
+This project is already usable, but it is still evolving quickly. If you run several instances on one machine, a **local supervisor agent** can be a practical extra safety layer. This is optional, not required.
+
+Use it for:
+- checking instance health
+- reading `service status` / `service doctor` / timeline before you touch anything
+- restarting only the affected instance when something is clearly down
+- reporting what happened instead of silently changing config
+
+Do **not** use it as a second product agent. Its job should be operations only: monitor, diagnose, restart, and report.
+
+### Suggested Brief
+
+You can give a local supervisor agent a brief like this:
+
+```text
+You are the local operations supervisor for cc-telegram-bridge on this machine.
+
+Your job is to keep bot instances healthy and easy to diagnose.
+
+Primary responsibilities:
+1. Check instance health
+2. Diagnose failures before taking action
+3. Restart only the affected instance when needed
+4. Report conclusions, evidence, and actions clearly
+
+Default operating rules:
+- Assume one instance serves one chat unless the instance is explicitly configured for multi-chat.
+- Do not change engine, model, yolo/approval mode, pairing, access, or multi-chat unless the user explicitly asks.
+- Do not clear tasks unless the user explicitly asks, or the task is confirmed stale and the user already approved cleanup.
+- Do not edit project code or README unless the user explicitly asks.
+- Prefer the smallest recovery action. Do not restart all instances unless necessary.
+
+Default diagnostic order:
+1. Check service status
+2. Check service doctor
+3. Check recent timeline/audit evidence
+4. Check stdout/stderr logs only if needed
+5. Decide whether the issue is:
+   - process not running
+   - engine/runtime failure
+   - Telegram delivery failure
+   - stale task/workflow residue
+   - auth/config problem
+6. Then decide whether a restart is justified
+
+Preferred commands:
+- `node dist/src/index.js telegram service status --instance <name>`
+- `node dist/src/index.js telegram service doctor --instance <name>`
+- `node dist/src/index.js telegram timeline --instance <name>`
+- `bash scripts/start-instance.sh <name>`
+- `bash scripts/stop-instance.sh <name>`
+
+Response format:
+- Conclusion
+- Evidence
+- Action taken or recommended
+```
+
+If you already use a local agent such as Hermes, that is a good fit for this role.
 
 ---
 

@@ -4,6 +4,7 @@ import {
   appendCommandSuccessAuditEventBestEffort,
   type TelegramTurnContext,
 } from "./turn-bookkeeping.js";
+import { applyEngineSelection } from "./instance-config.js";
 import type { NormalizedTelegramMessage } from "./update-normalizer.js";
 
 function isCompactCommand(text: string): boolean {
@@ -18,8 +19,59 @@ function isContextCommand(text: string): boolean {
   return /^\/context(?:@\w+)?(?:\s|$)/i.test(text.trim());
 }
 
+function parseEngineCommand(text: string): { engine: string } | null {
+  const match = text.trim().match(/^\/engine(?:@\w+)?(?:\s+(\S+))?$/i);
+  if (!match) return null;
+  return { engine: match[1] ?? "" };
+}
+
+function renderEngineSwitchMessage(input: {
+  locale: Locale;
+  engine: "claude" | "codex";
+  clearedModel: boolean;
+  resetSessionBindings: boolean;
+  resetSessionBindingFailed: boolean;
+}): string {
+  const { locale, engine, clearedModel, resetSessionBindings, resetSessionBindingFailed } = input;
+
+  if (locale === "zh") {
+    if (resetSessionBindingFailed) {
+      return clearedModel
+        ? `引擎已设为 ${engine}。已清除先前的模型覆盖。未能自动清除该实例的会话绑定；如有需要，请在重启后执行 /reset。重启此实例后生效。`
+        : `引擎已设为 ${engine}。未能自动清除该实例的会话绑定；如有需要，请在重启后执行 /reset。重启此实例后生效。`;
+    }
+    if (clearedModel && resetSessionBindings) {
+      return `引擎已设为 ${engine}。已清除先前的模型覆盖，并重置该实例的会话绑定。重启此实例后生效。`;
+    }
+    if (clearedModel) {
+      return `引擎已设为 ${engine}。已清除先前的模型覆盖。重启此实例后生效。`;
+    }
+    if (resetSessionBindings) {
+      return `引擎已设为 ${engine}。已重置该实例的会话绑定。重启此实例后生效。`;
+    }
+    return `引擎已设为 ${engine}。重启此实例后生效。`;
+  }
+
+  if (resetSessionBindingFailed) {
+    return clearedModel
+      ? `Engine set to ${engine}. Cleared the previous model override. Could not reset this instance's session bindings automatically; use /reset after restarting if needed. Restart this instance to apply.`
+      : `Engine set to ${engine}. Could not reset this instance's session bindings automatically; use /reset after restarting if needed. Restart this instance to apply.`;
+  }
+  if (clearedModel && resetSessionBindings) {
+    return `Engine set to ${engine}. Cleared the previous model override and reset this instance's session bindings. Restart this instance to apply.`;
+  }
+  if (clearedModel) {
+    return `Engine set to ${engine}. Cleared the previous model override. Restart this instance to apply.`;
+  }
+  if (resetSessionBindings) {
+    return `Engine set to ${engine}. Reset this instance's session bindings. Restart this instance to apply.`;
+  }
+  return `Engine set to ${engine}. Restart this instance to apply.`;
+}
+
 export interface EngineCommandConfig {
   engine: "codex" | "claude";
+  model?: string;
   resume?: {
     workspacePath: string;
   };
@@ -44,6 +96,7 @@ export interface EngineCommandContext extends TelegramTurnContext {
 
 export interface EngineCommandSessionStore {
   removeByChatId(chatId: number): Promise<boolean | void>;
+  clearAll(): Promise<number | void>;
 }
 
 export async function handleLocalEngineTelegramCommand(input: {
@@ -55,8 +108,74 @@ export async function handleLocalEngineTelegramCommand(input: {
   context: EngineCommandContext;
   bridge: EngineCommandBridge;
   sessionStore: EngineCommandSessionStore;
+  updateInstanceConfig: (updater: (config: Record<string, unknown>) => void) => Promise<void>;
 }): Promise<boolean> {
-  const { stateDir, startedAt, locale, cfg, normalized, context, bridge, sessionStore } = input;
+  const { stateDir, startedAt, locale, cfg, normalized, context, bridge, sessionStore, updateInstanceConfig } = input;
+
+  const engineCmd = parseEngineCommand(normalized.text);
+  if (engineCmd) {
+    let engineMessage: string;
+    if (!engineCmd.engine) {
+      engineMessage = locale === "zh"
+        ? [
+            `当前引擎：${cfg.engine}`,
+            "用 /engine <名称> 选择引擎：",
+            "/engine claude",
+            "/engine codex",
+            "切换后重启此实例以生效。",
+          ].join("\n")
+        : [
+            `Current engine: ${cfg.engine}`,
+            "Choose an engine with /engine <name>:",
+            "/engine claude",
+            "/engine codex",
+            "Restart this instance after switching to apply the change.",
+          ].join("\n");
+      await context.api.sendMessage(normalized.chatId, engineMessage);
+    } else if (engineCmd.engine !== "claude" && engineCmd.engine !== "codex") {
+      engineMessage = locale === "zh"
+        ? "用法: /engine [claude|codex]"
+        : "Usage: /engine [claude|codex]";
+      await context.api.sendMessage(normalized.chatId, engineMessage);
+    } else {
+      const engineChanged = cfg.engine !== engineCmd.engine;
+      let clearedModel = false;
+      let resetSessionBindings = false;
+      let resetSessionBindingFailed = false;
+      await updateInstanceConfig((config) => {
+        const result = applyEngineSelection(config, engineCmd.engine as "claude" | "codex");
+        clearedModel = result.clearedModel;
+      });
+      if (engineChanged) {
+        try {
+          await sessionStore.clearAll();
+          resetSessionBindings = true;
+        } catch (error) {
+          resetSessionBindingFailed = true;
+          console.error(
+            `Failed to clear instance session bindings after switching engine to ${engineCmd.engine}:`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }
+      engineMessage = renderEngineSwitchMessage({
+        locale,
+        engine: engineCmd.engine,
+        clearedModel,
+        resetSessionBindings,
+        resetSessionBindingFailed,
+      });
+      await context.api.sendMessage(normalized.chatId, engineMessage);
+    }
+
+    await appendCommandSuccessAuditEventBestEffort(stateDir, context, normalized, {
+      startedAt,
+      command: "engine",
+      responseText: engineMessage,
+      metadata: { value: engineCmd.engine || "query" },
+    });
+    return true;
+  }
 
   if (isCompactCommand(normalized.text)) {
     await context.api.sendMessage(

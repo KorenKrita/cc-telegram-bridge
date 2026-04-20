@@ -196,8 +196,36 @@ describe("runCli", () => {
         'Allowed chat 123 for instance "alpha".',
       ]);
       expect(messages[4]).toMatch(
-        /^Instance: alpha\nPolicy: allowlist\nPaired users: 0\nAllowlist: 123\nPending pairs: [A-Z2-9]{6} chat 84 expires 2026-04-08T00:05:00\.000Z$/,
+        /^Instance: alpha\nPolicy: allowlist\nMulti-chat: off\nPaired users: 0\nAllowlist: 123\nPending pairs: [A-Z2-9]{6} chat 84 expires 2026-04-08T00:05:00\.000Z$/,
       );
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("supports toggling multi-chat per instance", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+
+    try {
+      await runCli(["telegram", "access", "multi", "--instance", "alpha", "on"], {
+        env: { USERPROFILE: tempDir },
+        logger: {
+          log: (message) => messages.push(message),
+        },
+      });
+
+      await runCli(["telegram", "status", "--instance", "alpha"], {
+        env: { USERPROFILE: tempDir },
+        logger: {
+          log: (message) => messages.push(message),
+        },
+      });
+
+      expect(messages).toEqual([
+        'Set multi-chat for instance "alpha" to on.',
+        "Instance: alpha\nPolicy: pairing\nMulti-chat: on\nPaired users: 0\nAllowlist: none\nPending pairs: none",
+      ]);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -1001,6 +1029,34 @@ describe("runCli", () => {
 
       const configPath = path.join(tempDir, ".cctb", "alpha", "config.json");
       await expect(readFile(configPath, "utf8")).resolves.toContain('"engine": "claude"');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("clears incompatible model overrides when switching engines", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const messages: string[] = [];
+    const configPath = path.join(tempDir, ".cctb", "alpha", "config.json");
+
+    try {
+      await mkdir(path.dirname(configPath), { recursive: true });
+      await writeFile(
+        configPath,
+        JSON.stringify({ engine: "claude", model: "opus" }, null, 2) + "\n",
+        "utf8",
+      );
+
+      const handled = await runCli(["telegram", "engine", "codex", "--instance", "alpha"], {
+        env: { USERPROFILE: tempDir },
+        logger: { log: (message) => messages.push(message) },
+      });
+
+      expect(handled).toBe(true);
+      expect(messages[0]).toBe(
+        'Instance "alpha": engine set to "codex". Cleared the previous model override. Restart the service to apply.',
+      );
+      await expect(readFile(configPath, "utf8")).resolves.not.toContain('"model"');
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexAppServerAdapter } from "../src/codex/app-server-adapter.js";
 
@@ -45,6 +45,11 @@ class FakeChildProcess extends EventEmitter {
   stdin = new FakeWritable();
   stdout = new FakeStream();
   stderr = new FakeStream();
+  killCalls = 0;
+
+  kill() {
+    this.killCalls += 1;
+  }
 
   close(code: number | null) {
     this.emit("close", code);
@@ -191,6 +196,239 @@ describe("CodexAppServerAdapter", () => {
       child.stdout.emitData('{"id":4,"result":{"thread":{"turns":[{"id":"turn-1","items":[{"type":"agentMessage","text":"READY isolated"}]}]}}}\n');
       await promise;
     } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("starts app-server in workspace-write mode for full-auto instances", async () => {
+    const { child, calls, spawnFn } = createSpawnHarness();
+    const root = await mkdtemp(path.join(os.tmpdir(), "cc-telegram-bridge-"));
+    const configPath = path.join(root, "config.json");
+
+    try {
+      await writeFile(configPath, JSON.stringify({ approvalMode: "full-auto" }) + "\n", "utf8");
+      const adapter = new CodexAppServerAdapter(
+        "codex",
+        process.cwd(),
+        undefined,
+        spawnFn,
+        undefined,
+        undefined,
+        configPath,
+      );
+
+      const promise = adapter.sendUserMessage("telegram-12345", {
+        text: "Hello",
+        files: [],
+      });
+
+      await waitFor(() => child.stdin.lines.length >= 1);
+      expect(calls[0]?.args).toEqual(["app-server", "-c", 'sandbox_mode="workspace-write"']);
+      child.stdout.emitData('{"id":1,"result":{"platformOs":"windows"}}\n');
+      await waitFor(() => child.stdin.lines.length >= 2);
+      child.stdout.emitData('{"id":2,"result":{"thread":{"id":"thread-123"}}}\n');
+      await waitFor(() => child.stdin.lines.length >= 3);
+      child.stdout.emitData('{"method":"item/completed","params":{"threadId":"thread-123","item":{"type":"agentMessage","text":"ok"}}}\n');
+      child.stdout.emitData('{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-1","items":[],"status":"completed","error":null}}}\n');
+      await promise;
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("starts app-server in danger-full-access mode for bypass instances", async () => {
+    const { child, calls, spawnFn } = createSpawnHarness();
+    const root = await mkdtemp(path.join(os.tmpdir(), "cc-telegram-bridge-"));
+    const configPath = path.join(root, "config.json");
+
+    try {
+      await writeFile(configPath, JSON.stringify({ approvalMode: "bypass" }) + "\n", "utf8");
+      const adapter = new CodexAppServerAdapter(
+        "codex",
+        process.cwd(),
+        undefined,
+        spawnFn,
+        undefined,
+        undefined,
+        configPath,
+      );
+
+      const promise = adapter.sendUserMessage("telegram-12345", {
+        text: "Hello",
+        files: [],
+      });
+
+      await waitFor(() => child.stdin.lines.length >= 1);
+      expect(calls[0]?.args).toEqual(["app-server", "-c", 'sandbox_mode="danger-full-access"']);
+      child.stdout.emitData('{"id":1,"result":{"platformOs":"windows"}}\n');
+      await waitFor(() => child.stdin.lines.length >= 2);
+      child.stdout.emitData('{"id":2,"result":{"thread":{"id":"thread-123"}}}\n');
+      await waitFor(() => child.stdin.lines.length >= 3);
+      child.stdout.emitData('{"method":"item/completed","params":{"threadId":"thread-123","item":{"type":"agentMessage","text":"ok"}}}\n');
+      child.stdout.emitData('{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-1","items":[],"status":"completed","error":null}}}\n');
+      await promise;
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("forwards model and effort overrides into app-server startup config", async () => {
+    const { child, calls, spawnFn } = createSpawnHarness();
+    const root = await mkdtemp(path.join(os.tmpdir(), "cc-telegram-bridge-"));
+    const configPath = path.join(root, "config.json");
+
+    try {
+      await writeFile(configPath, JSON.stringify({ model: "gpt-5.3-codex", effort: "max" }) + "\n", "utf8");
+      const adapter = new CodexAppServerAdapter(
+        "codex",
+        process.cwd(),
+        undefined,
+        spawnFn,
+        undefined,
+        undefined,
+        configPath,
+      );
+
+      const promise = adapter.sendUserMessage("telegram-12345", {
+        text: "Hello",
+        files: [],
+      });
+
+      await waitFor(() => child.stdin.lines.length >= 1);
+      expect(calls[0]?.args).toEqual([
+        "app-server",
+        "-c",
+        'model_reasoning_effort="xhigh"',
+        "-c",
+        'model="gpt-5.3-codex"',
+      ]);
+      child.stdout.emitData('{"id":1,"result":{"platformOs":"windows"}}\n');
+      await waitFor(() => child.stdin.lines.length >= 2);
+      child.stdout.emitData('{"id":2,"result":{"thread":{"id":"thread-123"}}}\n');
+      await waitFor(() => child.stdin.lines.length >= 3);
+      child.stdout.emitData('{"method":"item/completed","params":{"threadId":"thread-123","item":{"type":"agentMessage","text":"ok"}}}\n');
+      child.stdout.emitData('{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-1","items":[],"status":"completed","error":null}}}\n');
+      await promise;
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for in-flight turns to finish before restarting for config changes", async () => {
+    const childA = new FakeChildProcess();
+    const childB = new FakeChildProcess();
+    const children = [childA, childB];
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const spawnFn = (command: string, args: string[]) => {
+      calls.push({ command, args });
+      const child = children.shift();
+      if (!child) {
+        throw new Error("no more fake children");
+      }
+      return child;
+    };
+    const root = await mkdtemp(path.join(os.tmpdir(), "cc-telegram-bridge-"));
+    const configPath = path.join(root, "config.json");
+
+    try {
+      await writeFile(configPath, JSON.stringify({ approvalMode: "normal" }) + "\n", "utf8");
+      const adapter = new CodexAppServerAdapter(
+        "codex",
+        process.cwd(),
+        undefined,
+        spawnFn as never,
+        undefined,
+        undefined,
+        configPath,
+      );
+
+      const firstPromise = adapter.sendUserMessage("telegram-100", {
+        text: "First",
+        files: [],
+      });
+
+      await waitFor(() => childA.stdin.lines.length >= 1);
+      const initA = JSON.parse(childA.stdin.lines[0] ?? "{}");
+      childA.stdout.emitData(`{"id":${initA.id},"result":{"platformOs":"windows"}}\n`);
+      await waitFor(() => childA.stdin.lines.length >= 2);
+      const startThreadA = JSON.parse(childA.stdin.lines[1] ?? "{}");
+      childA.stdout.emitData(`{"id":${startThreadA.id},"result":{"thread":{"id":"thread-a"}}}\n`);
+      await waitFor(() => childA.stdin.lines.length >= 3);
+
+      await writeFile(configPath, JSON.stringify({ approvalMode: "bypass" }) + "\n", "utf8");
+      const secondPromise = adapter.sendUserMessage("telegram-200", {
+        text: "Second",
+        files: [],
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(calls).toHaveLength(1);
+      expect(childA.killCalls).toBe(0);
+
+      childA.stdout.emitData('{"method":"item/completed","params":{"threadId":"thread-a","item":{"type":"agentMessage","text":"first ok"}}}\n');
+      childA.stdout.emitData('{"method":"turn/completed","params":{"threadId":"thread-a","turn":{"id":"turn-a","items":[],"status":"completed","error":null}}}\n');
+      await expect(firstPromise).resolves.toEqual({
+        text: "first ok",
+        sessionId: "thread-a",
+      });
+
+      await waitFor(() => childB.stdin.lines.length >= 1);
+      expect(childA.killCalls).toBe(1);
+      expect(calls[1]?.args).toEqual(["app-server", "-c", 'sandbox_mode="danger-full-access"']);
+
+      const initB = JSON.parse(childB.stdin.lines[0] ?? "{}");
+      childB.stdout.emitData(`{"id":${initB.id},"result":{"platformOs":"windows"}}\n`);
+      await waitFor(() => childB.stdin.lines.length >= 2);
+      const startThreadB = JSON.parse(childB.stdin.lines[1] ?? "{}");
+      childB.stdout.emitData(`{"id":${startThreadB.id},"result":{"thread":{"id":"thread-b"}}}\n`);
+      await waitFor(() => childB.stdin.lines.length >= 3);
+      childB.stdout.emitData('{"method":"item/completed","params":{"threadId":"thread-b","item":{"type":"agentMessage","text":"second ok"}}}\n');
+      childB.stdout.emitData('{"method":"turn/completed","params":{"threadId":"thread-b","turn":{"id":"turn-b","items":[],"status":"completed","error":null}}}\n');
+
+      await expect(secondPromise).resolves.toEqual({
+        text: "second ok",
+        sessionId: "thread-b",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("logs malformed config files instead of silently swallowing them", async () => {
+    const { child, calls, spawnFn } = createSpawnHarness();
+    const root = await mkdtemp(path.join(os.tmpdir(), "cc-telegram-bridge-"));
+    const configPath = path.join(root, "config.json");
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      await writeFile(configPath, "{not-json\n", "utf8");
+      const adapter = new CodexAppServerAdapter(
+        "codex",
+        process.cwd(),
+        undefined,
+        spawnFn,
+        undefined,
+        undefined,
+        configPath,
+      );
+
+      const promise = adapter.sendUserMessage("telegram-12345", {
+        text: "Hello",
+        files: [],
+      });
+
+      await waitFor(() => child.stdin.lines.length >= 1);
+      expect(calls[0]?.args).toEqual(["app-server"]);
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      child.stdout.emitData('{"id":1,"result":{"platformOs":"windows"}}\n');
+      await waitFor(() => child.stdin.lines.length >= 2);
+      child.stdout.emitData('{"id":2,"result":{"thread":{"id":"thread-123"}}}\n');
+      await waitFor(() => child.stdin.lines.length >= 3);
+      child.stdout.emitData('{"method":"item/completed","params":{"threadId":"thread-123","item":{"type":"agentMessage","text":"ok"}}}\n');
+      child.stdout.emitData('{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-1","items":[],"status":"completed","error":null}}}\n');
+      await promise;
+    } finally {
+      consoleErrorSpy.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
   });

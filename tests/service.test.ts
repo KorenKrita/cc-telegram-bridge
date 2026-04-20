@@ -15,6 +15,7 @@ import {
   readInstanceBotTokenFromEnvFile,
   resolveServiceEnvForInstance,
   _resetEnqueuedUpdateIds,
+  _resetStoppedTaskChats,
 } from "../src/service.js";
 import { ChatQueue } from "../src/runtime/chat-queue.js";
 import { Bridge } from "../src/runtime/bridge.js";
@@ -27,7 +28,6 @@ import {
   renderWorkingMessage,
 } from "../src/telegram/message-renderer.js";
 import { CodexAppServerAdapter } from "../src/codex/app-server-adapter.js";
-import { ProcessCodexAdapter } from "../src/codex/process-adapter.js";
 import { ProcessClaudeAdapter } from "../src/codex/claude-adapter.js";
 import { ClaudeStreamAdapter } from "../src/codex/claude-stream-adapter.js";
 import { parseAuditEvents } from "../src/state/audit-log.js";
@@ -96,6 +96,7 @@ function replaceBufferContents(buffer: Buffer, search: string, replace: string):
 
 afterEach(async () => {
   _resetEnqueuedUpdateIds();
+  _resetStoppedTaskChats();
   await rm(path.join(os.tmpdir(), "ignored"), { recursive: true, force: true });
   await rm(path.join(os.tmpdir(), "runtime-state.json"), { force: true });
 });
@@ -291,7 +292,7 @@ describe("createServiceDependenciesForInstance", () => {
     }
   });
 
-  it("falls back to the process adapter when codex yolo mode is enabled", async () => {
+  it("keeps using the app-server adapter when codex yolo mode is enabled", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const stateDir = path.join(root, ".cctb", "alpha");
     const envPath = path.join(stateDir, ".env");
@@ -310,8 +311,38 @@ describe("createServiceDependenciesForInstance", () => {
         "alpha",
       );
 
-      expect((result.bridge as any).adapter).toBeInstanceOf(ProcessCodexAdapter);
+      expect((result.bridge as any).adapter).toBeInstanceOf(CodexAppServerAdapter);
     } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses shared config validation when the service resolves codex runtime options", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const stateDir = path.join(root, ".cctb", "alpha");
+    const envPath = path.join(stateDir, ".env");
+    const configPath = path.join(stateDir, "config.json");
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(envPath, 'TELEGRAM_BOT_TOKEN="secret-token"\n', "utf8");
+      await writeFile(configPath, "{bad json\n", "utf8");
+
+      const result = await createServiceDependenciesForInstance(
+        {
+          USERPROFILE: root,
+          CODEX_EXECUTABLE: "codex",
+        },
+        "alpha",
+      );
+
+      expect((result.bridge as any).adapter).toBeInstanceOf(CodexAppServerAdapter);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`Malformed ${configPath}`),
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -1335,6 +1366,67 @@ describe("polling helpers", () => {
 
     expect(callCount).toBe(1);
     expect(api.sendMessage).toHaveBeenCalledWith(123, "Current task stopped.");
+  });
+
+  it("treats the first plain message after /stop as a fresh request instead of continuing the stopped task", async () => {
+    const logger = { error: vi.fn() };
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
+    };
+    const started = createDeferred<void>();
+    const firstAborted = createDeferred<void>();
+    const seenTexts: string[] = [];
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockImplementation(async ({ text, abortSignal }: { text: string; abortSignal?: AbortSignal }) => {
+        seenTexts.push(text);
+        if (text === "first") {
+          started.resolve();
+          await new Promise<void>((resolve) => {
+            abortSignal?.addEventListener("abort", () => {
+              firstAborted.resolve();
+              resolve();
+            }, { once: true });
+          });
+          return { text: "first aborted" };
+        }
+
+        return { text: "fresh reply" };
+      }),
+    };
+    const chatQueue = new ChatQueue();
+    const inboxDir = path.join(os.tmpdir(), "ignored");
+
+    const firstRun = processTelegramUpdates(
+      [{ update_id: 6, message: { chat: { id: 123, type: "private" }, from: { id: 456 }, text: "first" } }],
+      { api: api as never, bridge: bridge as never, inboxDir, chatQueue },
+      logger,
+    );
+
+    await started.promise;
+
+    await processTelegramUpdates(
+      [{ update_id: 7, message: { chat: { id: 123, type: "private" }, from: { id: 456 }, text: "/stop" } }],
+      { api: api as never, bridge: bridge as never, inboxDir, chatQueue },
+      logger,
+    );
+
+    await firstAborted.promise;
+    await firstRun;
+
+    await processTelegramUpdates(
+      [{ update_id: 8, message: { chat: { id: 123, type: "private" }, from: { id: 456 }, text: "继续" } }],
+      { api: api as never, bridge: bridge as never, inboxDir, chatQueue },
+      logger,
+    );
+
+    expect(seenTexts).toHaveLength(2);
+    expect(seenTexts[1]).toContain("[Previous task was explicitly stopped by the user.]");
+    expect(seenTexts[1]).toContain("Do not continue or resume that stopped task");
+    expect(seenTexts[1]).toContain("User's new message:\n继续");
   });
 
   it("downloads attachments and passes local file paths to the bridge", async () => {
@@ -4533,6 +4625,210 @@ describe("polling helpers", () => {
         }),
       }));
     } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("shows model choices on successful /model queries", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await mkdir(inboxDir, { recursive: true });
+    await writeFile(
+      path.join(root, "config.json"),
+      JSON.stringify({ engine: "claude" }, null, 2) + "\n",
+      "utf8",
+    );
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
+      getFile: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn(),
+    };
+
+    try {
+      await handleNormalizedTelegramMessage(
+        {
+          chatId: 123,
+          userId: 456,
+          chatType: "private",
+          text: "/model",
+          replyContext: undefined,
+          attachments: [],
+        },
+        { api: api as never, bridge: bridge as never, inboxDir },
+      );
+
+      expect(api.sendMessage).toHaveBeenCalledWith(
+        123,
+        [
+          "Current model: default",
+          "Choose a model with /model <name>:",
+          "/model opus",
+          "/model sonnet",
+          "/model haiku",
+          "/model off",
+          "1M context example: /model opus[1m]",
+        ].join("\n"),
+      );
+
+      const audit = parseAuditEvents(await readFile(path.join(root, "audit.log.jsonl"), "utf8"));
+      expect(audit).toContainEqual(expect.objectContaining({
+        type: "update.handle",
+        outcome: "success",
+        metadata: expect.objectContaining({
+          command: "model",
+          value: "query",
+          responseChars: expect.any(Number),
+          chunkCount: 1,
+        }),
+      }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("shows engine choices and applies /engine switches", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await mkdir(inboxDir, { recursive: true });
+    await writeFile(
+      path.join(root, "config.json"),
+      JSON.stringify({ engine: "claude", model: "opus" }, null, 2) + "\n",
+      "utf8",
+    );
+    const sessionStore = new SessionStore(path.join(root, "session.json"));
+    await sessionStore.upsert({
+      telegramChatId: 123,
+      codexSessionId: "thread-old",
+      status: "idle",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+    });
+    await sessionStore.upsert({
+      telegramChatId: 456,
+      codexSessionId: "thread-other",
+      status: "idle",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+    });
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
+      getFile: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn(),
+    };
+
+    try {
+      await handleNormalizedTelegramMessage(
+        {
+          chatId: 123,
+          userId: 456,
+          chatType: "private",
+          text: "/engine",
+          replyContext: undefined,
+          attachments: [],
+        },
+        { api: api as never, bridge: bridge as never, inboxDir },
+      );
+
+      expect(api.sendMessage).toHaveBeenCalledWith(
+        123,
+        [
+          "Current engine: claude",
+          "Choose an engine with /engine <name>:",
+          "/engine claude",
+          "/engine codex",
+          "Restart this instance after switching to apply the change.",
+        ].join("\n"),
+      );
+
+      await handleNormalizedTelegramMessage(
+        {
+          chatId: 123,
+          userId: 456,
+          chatType: "private",
+          text: "/engine codex",
+          replyContext: undefined,
+          attachments: [],
+        },
+        { api: api as never, bridge: bridge as never, inboxDir },
+      );
+
+      expect(api.sendMessage).toHaveBeenCalledWith(
+        123,
+        "Engine set to codex. Cleared the previous model override and reset this instance's session bindings. Restart this instance to apply.",
+      );
+      const configText = await readFile(path.join(root, "config.json"), "utf8");
+      expect(configText).toContain('"engine": "codex"');
+      expect(configText).not.toContain('"model"');
+      await expect(sessionStore.findByChatId(123)).resolves.toBeNull();
+      await expect(sessionStore.findByChatId(456)).resolves.toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to plain text when a voice-triggered reply trips Telegram markdown parsing", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
+    const inboxDir = path.join(root, "inbox");
+    await mkdir(inboxDir, { recursive: true });
+    const api = {
+      sendMessage: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("Telegram API request failed for sendMessage: Bad Request: can't parse entities: Can't find end of Italic entity"))
+        .mockResolvedValueOnce({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
+      getFile: vi.fn().mockResolvedValue({ file_path: "voice/message.ogg" }),
+      downloadFile: vi.fn().mockImplementation(async (_filePath: string, destinationPath: string) => {
+        await writeFile(destinationPath, "voice-bytes", "utf8");
+      }),
+    };
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockResolvedValue({ text: "preferred_layout" }),
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "spoken transcript",
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await handleNormalizedTelegramMessage(
+        {
+          chatId: 123,
+          userId: 456,
+          chatType: "private",
+          text: "What did I say?",
+          replyContext: undefined,
+          attachments: [{ fileId: "voice-1", kind: "voice" }],
+        },
+        {
+          api: api as never,
+          bridge: bridge as never,
+          inboxDir,
+        },
+      );
+
+      expect(bridge.handleAuthorizedMessage).toHaveBeenCalledWith(expect.objectContaining({
+        text: "What did I say?\nspoken transcript",
+      }));
+      expect(api.sendMessage).toHaveBeenNthCalledWith(1, 123, "preferred_layout", { parseMode: "Markdown" });
+      expect(api.sendMessage).toHaveBeenNthCalledWith(2, 123, "preferred_layout");
+    } finally {
+      vi.unstubAllGlobals();
       await rm(root, { recursive: true, force: true });
     }
   });

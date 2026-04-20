@@ -11,11 +11,35 @@ const PAIRING_TTL_MS = 5 * 60 * 1000;
 
 function createDefaultAccessState(): AccessState {
   return {
+    multiChat: false,
     policy: "pairing",
     pairedUsers: [],
     allowlist: [],
     pendingPairs: [],
   };
+}
+
+function findConflictingAuthorizedChatId(state: AccessState, chatId: number): number | null {
+  if (state.multiChat) {
+    return null;
+  }
+
+  const authorizedChatIds = new Set<number>([
+    ...state.allowlist,
+    ...state.pairedUsers.map((entry) => entry.telegramChatId),
+  ]);
+  authorizedChatIds.delete(chatId);
+
+  const conflict = authorizedChatIds.values().next();
+  return conflict.done ? null : conflict.value;
+}
+
+function countAuthorizedChats(state: AccessState): number {
+  return new Set<number>([
+    ...state.allowlist,
+    ...state.pairedUsers.map((entry) => entry.telegramChatId),
+    ...state.pendingPairs.map((entry) => entry.telegramChatId),
+  ]).size;
 }
 
 function generateCode(): string {
@@ -57,9 +81,23 @@ export class AccessStore {
     });
   }
 
+  async setMultiChat(enabled: boolean): Promise<void> {
+    await this.enqueueWrite(async () => {
+      const state = await this.load();
+      if (!enabled && countAuthorizedChats(state) > 1) {
+        throw new Error("cannot disable multi-chat while multiple chats are authorized or pending pairing");
+      }
+      state.multiChat = enabled;
+      await this.store.write(state);
+    });
+  }
+
   async allowChat(chatId: number): Promise<void> {
     await this.enqueueWrite(async () => {
       const state = await this.load();
+      if (findConflictingAuthorizedChatId(state, chatId) !== null) {
+        throw new Error("instance is locked to another chat until multi-chat is enabled");
+      }
       state.allowlist = [...new Set([...state.allowlist, chatId])];
       await this.store.write(state);
     });
@@ -76,6 +114,7 @@ export class AccessStore {
   }
 
   async getStatus(): Promise<{
+    multiChat: boolean;
     policy: AccessPolicy;
     pairedUsers: number;
     allowlist: number[];
@@ -84,6 +123,7 @@ export class AccessStore {
     const state = await this.load();
 
     return {
+      multiChat: state.multiChat,
       policy: state.policy,
       pairedUsers: state.pairedUsers.length,
       allowlist: [...state.allowlist],
@@ -107,6 +147,9 @@ export class AccessStore {
     let issued!: PendingPair;
     await this.enqueueWrite(async () => {
       const state = await this.load();
+      if (findConflictingAuthorizedChatId(state, telegramChatId) !== null) {
+        throw new Error("instance is locked to another chat until multi-chat is enabled");
+      }
       const nowTime = now.getTime();
       const reusablePendingPair = state.pendingPairs.find(
         (pair) =>
@@ -156,12 +199,17 @@ export class AccessStore {
         return;
       }
 
-      state.pendingPairs = state.pendingPairs.filter((pair) => pair.code !== code);
-
       if (new Date(pendingPair.expiresAt).getTime() <= now.getTime()) {
+        state.pendingPairs = state.pendingPairs.filter((pair) => pair.code !== code);
         await this.store.write(state);
         return;
       }
+
+      if (findConflictingAuthorizedChatId(state, pendingPair.telegramChatId) !== null) {
+        throw new Error("instance is locked to another chat until multi-chat is enabled");
+      }
+
+      state.pendingPairs = state.pendingPairs.filter((pair) => pair.code !== code);
 
       pairedUser = {
         telegramUserId: pendingPair.telegramUserId,

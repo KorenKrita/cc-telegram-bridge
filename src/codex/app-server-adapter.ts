@@ -38,6 +38,8 @@ type AppServerChildProcess = {
 type SpawnCodex = (command: string, args: string[], options: SpawnOptions) => AppServerChildProcess;
 const MAX_INSTRUCTIONS_CHARS = 16_000;
 const MAX_LINE_BUFFER_BYTES = 1024 * 1024;
+export const CODEX_APP_SERVER_TURN_TIMEOUT_MS = 60 * 60_000;
+export const CODEX_APP_SERVER_INACTIVITY_TIMEOUT_MS = 5 * 60_000;
 type ApprovalMode = "normal" | "full-auto" | "bypass";
 
 type JsonRpcResponse = {
@@ -61,6 +63,10 @@ type PendingTurn = {
   errorMessage?: string;
   turnId?: string;
   onProgress?: (partialText: string) => void;
+  timeout?: ReturnType<typeof setTimeout>;
+  inactivityTimeout?: ReturnType<typeof setTimeout>;
+  inactivityTimeoutDisabled?: boolean;
+  abortCleanup?: () => void;
   resolve: (text: string) => void;
   reject: (error: Error) => void;
 };
@@ -130,6 +136,8 @@ export class CodexAppServerAdapter implements CodexAdapter {
     instructionsPath?: string,
     engineHomePath?: string,
     configPath?: string,
+    private readonly turnTimeoutMs: number = CODEX_APP_SERVER_TURN_TIMEOUT_MS,
+    private readonly turnInactivityTimeoutMs: number | null = CODEX_APP_SERVER_INACTIVITY_TIMEOUT_MS,
   ) {
     const buildChildEnv = () => {
       const env = { ...process.env };
@@ -171,7 +179,13 @@ export class CodexAppServerAdapter implements CodexAdapter {
     const threadId = isLogicalTelegramSessionId(sessionId)
       ? await this.startThread()
       : await this.resolveThreadForMessage(sessionId);
-    const text = await this.startTurn(threadId, prompt, input.onProgress);
+    const text = await this.startTurn(
+      threadId,
+      prompt,
+      input.onProgress,
+      input.abortSignal,
+      input.disableRuntimeTimeout ? null : this.turnTimeoutMs,
+    );
 
     return {
       text: text.trim() || `Session ${threadId} completed.`,
@@ -377,6 +391,7 @@ export class CodexAppServerAdapter implements CodexAdapter {
       const threadId = this.readString(parsed.params?.threadId);
       const delta = this.readString(parsed.params?.delta);
       if (threadId && delta) {
+        this.noteTurnActivity(threadId);
         const pending = this.pendingTurns.get(threadId);
         if (pending) {
           pending.chunks.push(delta);
@@ -388,6 +403,9 @@ export class CodexAppServerAdapter implements CodexAdapter {
 
     if (parsed.method === "item/completed") {
       const threadId = this.readString(parsed.params?.threadId);
+      if (threadId) {
+        this.noteTurnActivity(threadId);
+      }
       const pending = threadId ? this.pendingTurns.get(threadId) : undefined;
       const item = parsed.params?.item;
       if (
@@ -417,6 +435,8 @@ export class CodexAppServerAdapter implements CodexAdapter {
         return;
       }
 
+      this.noteTurnActivity(threadId);
+
       const pending = this.pendingTurns.get(threadId);
       if (!pending) {
         return;
@@ -443,6 +463,9 @@ export class CodexAppServerAdapter implements CodexAdapter {
 
     if (parsed.method === "error") {
       const threadId = this.readString(parsed.params?.threadId);
+      if (threadId) {
+        this.noteTurnActivity(threadId);
+      }
       const pending = threadId ? this.pendingTurns.get(threadId) : undefined;
       const errorMessage = this.readErrorMessage(parsed.params?.error);
 
@@ -609,9 +632,79 @@ export class CodexAppServerAdapter implements CodexAdapter {
     threadId: string,
     prompt: string,
     onProgress?: (partialText: string) => void,
+    abortSignal?: AbortSignal,
+    timeoutMs: number | null = this.turnTimeoutMs,
   ): Promise<string> {
     const pending = await new Promise<string>((resolve, reject) => {
-      this.pendingTurns.set(threadId, { chunks: [], onProgress, resolve, reject });
+      const turnErrorPrefix = "Codex app-server turn";
+      const rejectAndCleanup = (error: Error) => {
+        pendingTurn.timeout && clearTimeout(pendingTurn.timeout);
+        pendingTurn.timeout = undefined;
+        pendingTurn.inactivityTimeout && clearTimeout(pendingTurn.inactivityTimeout);
+        pendingTurn.inactivityTimeout = undefined;
+        pendingTurn.abortCleanup?.();
+        pendingTurn.abortCleanup = undefined;
+        reject(error);
+      };
+      const resolveAndCleanup = (text: string) => {
+        pendingTurn.timeout && clearTimeout(pendingTurn.timeout);
+        pendingTurn.timeout = undefined;
+        pendingTurn.inactivityTimeout && clearTimeout(pendingTurn.inactivityTimeout);
+        pendingTurn.inactivityTimeout = undefined;
+        pendingTurn.abortCleanup?.();
+        pendingTurn.abortCleanup = undefined;
+        resolve(text);
+      };
+      const pendingTurn: PendingTurn = {
+        chunks: [],
+        onProgress,
+        inactivityTimeoutDisabled: timeoutMs === null,
+        resolve: resolveAndCleanup,
+        reject: rejectAndCleanup,
+      };
+      const abortTurn = (error: Error) => {
+        const pendingTurnState = this.pendingTurns.get(threadId);
+        if (pendingTurnState && pendingTurnState !== pendingTurn) {
+          return;
+        }
+
+        if (pendingTurnState === pendingTurn) {
+          this.pendingTurns.delete(threadId);
+        }
+        pendingTurn.reject(error);
+        // Codex app-server exposes no per-turn cancel RPC today, so a best-effort
+        // turn abort means recycling the whole child process.
+        this.destroy();
+      };
+
+      if (timeoutMs !== null) {
+        pendingTurn.timeout = setTimeout(() => {
+          abortTurn(
+            new Error(
+              `${turnErrorPrefix} timed out after ${Math.max(1, Math.round(timeoutMs / 60_000))} minutes`,
+            ),
+          );
+        }, timeoutMs);
+      }
+
+      this.pendingTurns.set(threadId, pendingTurn);
+      this.scheduleTurnInactivityTimeout(
+        threadId,
+        pendingTurn,
+        timeoutMs === null ? null : this.turnInactivityTimeoutMs,
+      );
+
+      if (abortSignal) {
+        const onAbort = () => {
+          abortTurn(new Error(`${turnErrorPrefix} aborted`));
+        };
+        pendingTurn.abortCleanup = () => abortSignal.removeEventListener("abort", onAbort);
+        if (abortSignal.aborted) {
+          onAbort();
+          return;
+        }
+        abortSignal.addEventListener("abort", onAbort, { once: true });
+      }
       this.request("turn/start", {
         threadId,
         input: [
@@ -624,13 +717,60 @@ export class CodexAppServerAdapter implements CodexAdapter {
       }, {
         idleBlocking: false,
       }).catch((error) => {
-        this.pendingTurns.delete(threadId);
+        const pendingTurnState = this.pendingTurns.get(threadId);
+        if (pendingTurnState === pendingTurn) {
+          this.pendingTurns.delete(threadId);
+        }
         this.notifyIdleWaitersIfIdle();
-        reject(error);
+        pendingTurn.reject(error instanceof Error ? error : new Error(String(error)));
       });
     });
 
     return pending;
+  }
+
+  private noteTurnActivity(threadId: string): void {
+    const pending = this.pendingTurns.get(threadId);
+    if (!pending) {
+      return;
+    }
+
+    this.scheduleTurnInactivityTimeout(
+      threadId,
+      pending,
+      pending.inactivityTimeoutDisabled ? null : this.turnInactivityTimeoutMs,
+    );
+  }
+
+  private scheduleTurnInactivityTimeout(
+    threadId: string,
+    pending: PendingTurn,
+    timeoutMs: number | null,
+  ): void {
+    pending.inactivityTimeout && clearTimeout(pending.inactivityTimeout);
+    pending.inactivityTimeout = undefined;
+
+    if (timeoutMs === null) {
+      return;
+    }
+
+    pending.inactivityTimeout = setTimeout(() => {
+      const pendingTurnState = this.pendingTurns.get(threadId);
+      if (pendingTurnState && pendingTurnState !== pending) {
+        return;
+      }
+
+      if (pendingTurnState === pending) {
+        this.pendingTurns.delete(threadId);
+      }
+
+      pending.reject(
+        new Error(
+          `Codex app-server turn became inactive after ${Math.max(1, Math.round(timeoutMs / 60_000))} minutes`,
+        ),
+      );
+      this.destroy();
+    }, timeoutMs);
   }
 
   private async completeTurn(threadId: string, turnId: string | undefined, pending: PendingTurn): Promise<void> {

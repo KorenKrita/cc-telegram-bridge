@@ -41,12 +41,12 @@ describe("Bridge", () => {
 
     expect(accessStore.load).toHaveBeenCalledTimes(1);
     expect(sessionManager.getOrCreateSession).toHaveBeenCalledWith(84);
-    expect(adapter.sendUserMessage).toHaveBeenCalledWith("telegram-84", {
+    expect(adapter.sendUserMessage).toHaveBeenCalledWith("telegram-84", expect.objectContaining({
       text: "hello",
       files: [],
       instructions: expect.stringContaining("Telegram chat bridge"),
       requestOutputDir: undefined,
-    });
+    }));
     expect((adapter.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.instructions).toContain(
       "```file:example.py",
     );
@@ -55,6 +55,76 @@ describe("Bridge", () => {
     );
     expect(result.text).toBe("done");
     expect(sessionManager.bindSession).not.toHaveBeenCalled();
+  });
+
+  it("disables runtime timeout only when the user explicitly asks for a long task", async () => {
+    const accessStore: AccessStoreLike = {
+      load: vi.fn().mockResolvedValue({
+        multiChat: false,
+        policy: "allowlist",
+        pairedUsers: [],
+        allowlist: [84],
+        pendingPairs: [],
+      }),
+      issuePairingCode: vi.fn(),
+    };
+    const sessionManager: SessionManagerLike = {
+      getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
+      bindSession: vi.fn(),
+      removeSession: vi.fn(),
+    };
+    const adapter: CodexAdapter = {
+      sendUserMessage: vi.fn().mockResolvedValue({ text: "done" }),
+      createSession: vi.fn(),
+    };
+
+    const bridge = new Bridge(accessStore, sessionManager, adapter);
+    await bridge.handleAuthorizedMessage({
+      chatId: 84,
+      userId: 42,
+      chatType: "private",
+      text: "请执行任务：把这批图都跑完，不设超时。",
+      replyContext: undefined,
+      files: [],
+    });
+
+    expect(adapter.sendUserMessage).toHaveBeenCalledWith("telegram-84", expect.objectContaining({
+      disableRuntimeTimeout: true,
+    }));
+  });
+
+  it("keeps runtime timeout enabled for ordinary execution requests", async () => {
+    const accessStore: AccessStoreLike = {
+      load: vi.fn().mockResolvedValue({
+        multiChat: false,
+        policy: "allowlist",
+        pairedUsers: [],
+        allowlist: [84],
+        pendingPairs: [],
+      }),
+      issuePairingCode: vi.fn(),
+    };
+    const sessionManager: SessionManagerLike = {
+      getOrCreateSession: vi.fn().mockResolvedValue({ sessionId: "telegram-84" }),
+      bindSession: vi.fn(),
+      removeSession: vi.fn(),
+    };
+    const adapter: CodexAdapter = {
+      sendUserMessage: vi.fn().mockResolvedValue({ text: "done" }),
+      createSession: vi.fn(),
+    };
+
+    const bridge = new Bridge(accessStore, sessionManager, adapter);
+    await bridge.handleAuthorizedMessage({
+      chatId: 84,
+      userId: 42,
+      chatType: "private",
+      text: "请执行任务：卸载 browser harness。",
+      replyContext: undefined,
+      files: [],
+    });
+
+    expect((adapter.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.disableRuntimeTimeout).toBeUndefined();
   });
 
   it("rejects a message when the chat is not on the allowlist", async () => {
@@ -588,12 +658,12 @@ describe("Bridge", () => {
       files: [],
     });
 
-    expect(adapter.sendUserMessage).toHaveBeenCalledWith("telegram-84", {
+    expect(adapter.sendUserMessage).toHaveBeenCalledWith("telegram-84", expect.objectContaining({
       text: "answer this\n\n[Quoted message #99]\nquoted text",
       files: [],
       instructions: expect.stringContaining("Telegram chat bridge"),
       requestOutputDir: undefined,
-    });
+    }));
     expect((adapter.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.instructions).toContain(
       "deliver it as a Telegram document attachment",
     );

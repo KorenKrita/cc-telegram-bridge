@@ -5,7 +5,10 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { CodexAppServerAdapter } from "../src/codex/app-server-adapter.js";
+import {
+  CODEX_APP_SERVER_TURN_TIMEOUT_MS,
+  CodexAppServerAdapter,
+} from "../src/codex/app-server-adapter.js";
 
 async function waitFor(condition: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -89,6 +92,10 @@ function createSpawnHarness() {
 }
 
 describe("CodexAppServerAdapter", () => {
+  it("defaults the hard turn timeout to one hour", () => {
+    expect(CODEX_APP_SERVER_TURN_TIMEOUT_MS).toBe(60 * 60_000);
+  });
+
   it("creates a logical telegram session placeholder", async () => {
     const adapter = new CodexAppServerAdapter("codex", process.cwd());
     await expect(adapter.createSession(12345)).resolves.toEqual({
@@ -648,6 +655,29 @@ describe("CodexAppServerAdapter", () => {
     await expect(promise).rejects.toThrow("unexpected status 401 Unauthorized");
   });
 
+  it("aborts an in-flight turn when the caller aborts the request", async () => {
+    const { child, spawnFn } = createSpawnHarness();
+    const adapter = new CodexAppServerAdapter("codex", process.cwd(), spawnFn);
+    const controller = new AbortController();
+
+    const promise = adapter.sendUserMessage("telegram-12345", {
+      text: "Hello",
+      files: [],
+      abortSignal: controller.signal,
+    });
+
+    await waitFor(() => child.stdin.lines.length >= 1);
+    child.stdout.emitData('{"id":1,"result":{"platformOs":"windows"}}\n');
+    await waitFor(() => child.stdin.lines.length >= 2);
+    child.stdout.emitData('{"id":2,"result":{"thread":{"id":"thread-123"}}}\n');
+    await waitFor(() => child.stdin.lines.length >= 3);
+
+    controller.abort();
+
+    await expect(promise).rejects.toThrow("Codex app-server turn aborted");
+    expect(child.killCalls).toBe(1);
+  });
+
   it("rejects when thread/read shows the completed turn actually failed", async () => {
     const { child, spawnFn } = createSpawnHarness();
     const adapter = new CodexAppServerAdapter("codex", process.cwd(), spawnFn);
@@ -670,6 +700,63 @@ describe("CodexAppServerAdapter", () => {
     child.stdout.emitData('{"id":4,"result":{"thread":{"turns":[{"id":"turn-1","items":[{"type":"userMessage","content":[{"type":"text","text":"Hello"}]}],"status":"failed","error":{"message":"unexpected status 401 Unauthorized","additionalDetails":null}}]}}}\n');
 
     await expect(promise).rejects.toThrow("unexpected status 401 Unauthorized");
+  });
+
+  it("times out an in-flight turn that never completes and restarts cleanly", async () => {
+    const { child, spawnFn } = createSpawnHarness();
+    const adapter = new CodexAppServerAdapter(
+      "codex",
+      process.cwd(),
+      undefined,
+      spawnFn,
+      undefined,
+      undefined,
+      undefined,
+      1,
+    );
+
+    const promise = adapter.sendUserMessage("telegram-12345", {
+      text: "Hello",
+      files: [],
+    });
+
+    await waitFor(() => child.stdin.lines.length >= 1);
+    child.stdout.emitData('{"id":1,"result":{"platformOs":"windows"}}\n');
+    await waitFor(() => child.stdin.lines.length >= 2);
+    child.stdout.emitData('{"id":2,"result":{"thread":{"id":"thread-123"}}}\n');
+    await waitFor(() => child.stdin.lines.length >= 3);
+
+    await expect(promise).rejects.toThrow("Codex app-server turn timed out");
+    expect(child.killCalls).toBe(1);
+  });
+
+  it("aborts a turn that goes completely idle even when the hard timeout is long", async () => {
+    const { child, spawnFn } = createSpawnHarness();
+    const adapter = new CodexAppServerAdapter(
+      "codex",
+      process.cwd(),
+      undefined,
+      spawnFn,
+      undefined,
+      undefined,
+      undefined,
+      60 * 60_000,
+      1,
+    );
+
+    const promise = adapter.sendUserMessage("telegram-12345", {
+      text: "Hello",
+      files: [],
+    });
+
+    await waitFor(() => child.stdin.lines.length >= 1);
+    child.stdout.emitData('{"id":1,"result":{"platformOs":"windows"}}\n');
+    await waitFor(() => child.stdin.lines.length >= 2);
+    child.stdout.emitData('{"id":2,"result":{"thread":{"id":"thread-123"}}}\n');
+    await waitFor(() => child.stdin.lines.length >= 3);
+
+    await expect(promise).rejects.toThrow("Codex app-server turn became inactive");
+    expect(child.killCalls).toBe(1);
   });
 
   it("rejects when app-server stdin write fails", async () => {

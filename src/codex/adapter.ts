@@ -37,6 +37,7 @@ export interface CodexUserMessageInput {
   requestOutputDir?: string;
   workspaceOverride?: string;
   abortSignal?: AbortSignal;
+  disableRuntimeTimeout?: boolean;
 }
 
 export interface CodexAdapter {

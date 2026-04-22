@@ -27,9 +27,9 @@ import {
   renderErrorMessage,
   renderWorkingMessage,
 } from "../src/telegram/message-renderer.js";
-import { CodexAppServerAdapter } from "../src/codex/app-server-adapter.js";
 import { ProcessClaudeAdapter } from "../src/codex/claude-adapter.js";
 import { ClaudeStreamAdapter } from "../src/codex/claude-stream-adapter.js";
+import { ProcessCodexAdapter } from "../src/codex/process-adapter.js";
 import { parseAuditEvents } from "../src/state/audit-log.js";
 import * as auditLog from "../src/state/audit-log.js";
 import * as busClient from "../src/bus/bus-client.js";
@@ -168,7 +168,7 @@ describe("createServiceDependenciesForInstance", () => {
     }
   });
 
-  it("uses the persistent Codex app-server adapter by default", async () => {
+  it("uses the process Codex adapter by default", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const envPath = path.join(root, ".cctb", "alpha", ".env");
 
@@ -184,7 +184,7 @@ describe("createServiceDependenciesForInstance", () => {
         "alpha",
       );
 
-      expect((result.bridge as any).adapter).toBeInstanceOf(CodexAppServerAdapter);
+      expect((result.bridge as any).adapter).toBeInstanceOf(ProcessCodexAdapter);
       // Codex bots now share ~/.codex/ directly — same reasoning as Claude.
       expect((result.bridge as any).adapter.childEnv.CODEX_HOME).toBeUndefined();
     } finally {
@@ -292,7 +292,7 @@ describe("createServiceDependenciesForInstance", () => {
     }
   });
 
-  it("keeps using the app-server adapter when codex yolo mode is enabled", async () => {
+  it("keeps using the process adapter when codex yolo mode is enabled", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const stateDir = path.join(root, ".cctb", "alpha");
     const envPath = path.join(stateDir, ".env");
@@ -311,7 +311,7 @@ describe("createServiceDependenciesForInstance", () => {
         "alpha",
       );
 
-      expect((result.bridge as any).adapter).toBeInstanceOf(CodexAppServerAdapter);
+      expect((result.bridge as any).adapter).toBeInstanceOf(ProcessCodexAdapter);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -337,7 +337,7 @@ describe("createServiceDependenciesForInstance", () => {
         "alpha",
       );
 
-      expect((result.bridge as any).adapter).toBeInstanceOf(CodexAppServerAdapter);
+      expect((result.bridge as any).adapter).toBeInstanceOf(ProcessCodexAdapter);
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         expect.stringContaining(`Malformed ${configPath}`),
       );
@@ -1260,7 +1260,7 @@ describe("polling helpers", () => {
       globalThis.setTimeout = originalSetTimeout;
       release.resolve();
       await waitForCondition(() => api.sendMessage.mock.calls.length > 0);
-      await rm(root, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 });
     }
   });
 
@@ -1393,6 +1393,58 @@ describe("polling helpers", () => {
 
     expect(bridge.handleAuthorizedMessage).toHaveBeenCalledTimes(2);
     expect(maxConcurrentCalls).toBe(1);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("enqueues later updates from the same poll batch without waiting for the first chat to finish", async () => {
+    const logger = {
+      error: vi.fn(),
+    };
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
+    };
+    const firstStarted = createDeferred<void>();
+    const secondStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockImplementation(async ({ text, chatId }: { text: string; chatId: number }) => {
+        if (chatId === 123) {
+          firstStarted.resolve();
+          await releaseFirst.promise;
+        }
+
+        if (chatId === 456) {
+          secondStarted.resolve();
+        }
+
+        return { text: `${text} done` };
+      }),
+    };
+    const inboxDir = path.join(os.tmpdir(), "ignored");
+
+    const run = processTelegramUpdates(
+      [
+        { update_id: 10, message: { chat: { id: 123, type: "private" }, from: { id: 1 }, text: "first" } },
+        { update_id: 11, message: { chat: { id: 456, type: "private" }, from: { id: 2 }, text: "second" } },
+      ],
+      {
+        api: api as never,
+        bridge: bridge as never,
+        inboxDir,
+      },
+      logger,
+    );
+
+    await firstStarted.promise;
+    await secondStarted.promise;
+    releaseFirst.resolve();
+    await run;
+
+    expect(bridge.handleAuthorizedMessage).toHaveBeenCalledTimes(2);
     expect(logger.error).not.toHaveBeenCalled();
   });
 
@@ -1566,6 +1618,71 @@ describe("polling helpers", () => {
     expect(seenTexts[1]).toContain("[Previous task was explicitly stopped by the user.]");
     expect(seenTexts[1]).toContain("Do not continue or resume that stopped task");
     expect(seenTexts[1]).toContain("User's new message:\n继续");
+  });
+
+  it("clears the /stop fence when the next chat message is a slash command", async () => {
+    const logger = { error: vi.fn() };
+    const api = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      editMessage: vi.fn().mockResolvedValue({ message_id: 11 }),
+      sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendMediaGroup: vi.fn().mockResolvedValue(undefined),
+    };
+    const started = createDeferred<void>();
+    const firstAborted = createDeferred<void>();
+    const seenTexts: string[] = [];
+    const bridge = {
+      checkAccess: vi.fn().mockResolvedValue({ kind: "allow" }),
+      handleAuthorizedMessage: vi.fn().mockImplementation(async ({ text, abortSignal }: { text: string; abortSignal?: AbortSignal }) => {
+        seenTexts.push(text);
+        if (text === "first") {
+          started.resolve();
+          await new Promise<void>((resolve) => {
+            abortSignal?.addEventListener("abort", () => {
+              firstAborted.resolve();
+              resolve();
+            }, { once: true });
+          });
+          return { text: "first aborted" };
+        }
+
+        return { text: "fresh reply" };
+      }),
+    };
+    const chatQueue = new ChatQueue();
+    const inboxDir = path.join(os.tmpdir(), "ignored");
+
+    const firstRun = processTelegramUpdates(
+      [{ update_id: 9, message: { chat: { id: 123, type: "private" }, from: { id: 456 }, text: "first" } }],
+      { api: api as never, bridge: bridge as never, inboxDir, chatQueue },
+      logger,
+    );
+
+    await started.promise;
+
+    await processTelegramUpdates(
+      [{ update_id: 10, message: { chat: { id: 123, type: "private" }, from: { id: 456 }, text: "/stop" } }],
+      { api: api as never, bridge: bridge as never, inboxDir, chatQueue },
+      logger,
+    );
+
+    await firstAborted.promise;
+    await firstRun;
+
+    await processTelegramUpdates(
+      [{ update_id: 11, message: { chat: { id: 123, type: "private" }, from: { id: 456 }, text: "/status" } }],
+      { api: api as never, bridge: bridge as never, inboxDir, chatQueue },
+      logger,
+    );
+
+    await processTelegramUpdates(
+      [{ update_id: 12, message: { chat: { id: 123, type: "private" }, from: { id: 456 }, text: "继续" } }],
+      { api: api as never, bridge: bridge as never, inboxDir, chatQueue },
+      logger,
+    );
+
+    expect(seenTexts).toHaveLength(2);
+    expect(seenTexts[1]).toBe("继续");
   });
 
   it("downloads attachments and passes local file paths to the bridge", async () => {
@@ -6359,7 +6476,7 @@ describe("polling helpers", () => {
     }
   });
 
-  it("does not create codex telegram-out directories for ordinary messages", async () => {
+  it("creates fresh codex telegram-out directories even for ordinary messages", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-telegram-channel-"));
     const inboxDir = path.join(root, "inbox");
     await writeFile(path.join(root, "config.json"), JSON.stringify({ engine: "codex", verbosity: 0 }) + "\n", "utf8");
@@ -6396,7 +6513,7 @@ describe("polling helpers", () => {
 
       expect(bridge.handleAuthorizedMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          requestOutputDir: undefined,
+          requestOutputDir: expect.stringContaining(path.join("workspace", ".telegram-out")),
         }),
       );
       expect(api.sendDocument).not.toHaveBeenCalled();

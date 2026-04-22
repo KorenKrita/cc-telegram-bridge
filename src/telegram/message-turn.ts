@@ -72,10 +72,6 @@ export interface WorkflowAwareTurnContext {
   verbosity?: number;
 }
 
-function wantsTelegramOut(text: string): boolean {
-  return /(发.*文件|传.*文件|发送.*文件|导出.*文件|文件.*传|文件.*发|生成.*文件|generate.*file|send.*file|export.*file)/i.test(text);
-}
-
 function defaultBuildContinueAnalysisKeyboard(uploadId: string): { inlineKeyboard: InlineKeyboardButton[][] } {
   return {
     inlineKeyboard: [[{ text: "Continue Analysis", callbackData: `continue-archive:${uploadId}` }]],
@@ -108,6 +104,7 @@ export async function executeWorkflowAwareTelegramTurn(input: {
     text: string,
     inboxDir: string,
     workspaceOverride: string | undefined,
+    requestOutputDir: string | undefined,
     locale: Locale,
   ) => Promise<number>;
   sendTelegramOutFile: (chatId: number, filename: string, contents: Uint8Array) => Promise<void>;
@@ -176,7 +173,7 @@ export async function executeWorkflowAwareTelegramTurn(input: {
     });
   }
 
-  if (cfg.engine === "codex" && wantsTelegramOut(normalized.text)) {
+  if (cfg.engine === "codex") {
     state.telegramOutDirPath = (await createTelegramOutDir(stateDir, `${Date.now()}-${normalized.chatId}`)).dirPath;
   }
 
@@ -357,6 +354,7 @@ export async function executeWorkflowAwareTelegramTurn(input: {
       text,
       context.inboxDir,
       cfg.resume?.workspacePath,
+      undefined,
       locale,
     );
   };
@@ -383,32 +381,15 @@ export async function executeWorkflowAwareTelegramTurn(input: {
 
   await recordTurnUsageAndBudgetAudit(stateDir, cfg.budgetUsd, context, normalized, result.usage);
 
-  // Decide whether to send a separate full-text message after the progress card.
-  // In streaming mode, the progress card already displays the final complete text
-  // via editMessage. Only send a separate delivery when:
-  //   - Non-streaming (no progress card was ever sent)
-  //   - Response has file blocks that need extraction ([send-file:] tags, ```file: blocks)
-  //   - Response is long enough that the progress card truncated it (4096-char limit)
-  const hasFileBlocks = /```file:\S+\n/.test(result.text);
-  const hasFileTags = /\[send-file:[^\]]+\]/.test(result.text);
-  const needsFileDelivery = hasFileBlocks || hasFileTags;
-  // The progress card includes header/tool-call stats which add ~200 chars overhead,
-  // plus markdownToTelegramHtml expansion. Use 3200 as a safe threshold to detect
-  // responses that would be truncated in the progress card.
-  const likelyTruncated = result.text.length > 3200;
-  if (updateIntervalMs === null || needsFileDelivery || likelyTruncated) {
-    // Non-streaming: always use full delivery
-    // Streaming + files: need deliverTelegramResponse to extract and send attachments
-    // Streaming + long text: progress card truncated; send full chunked version
-    await deliverTelegramResponse(
-      context.api,
-      normalized.chatId,
-      result.text,
-      context.inboxDir,
-      cfg.resume?.workspacePath,
-      locale,
-    );
-  }
+  await deliverTelegramResponse(
+    context.api,
+    normalized.chatId,
+    result.text,
+    context.inboxDir,
+    cfg.resume?.workspacePath,
+    state.telegramOutDirPath,
+    locale,
+  );
 
   if (state.telegramOutDirPath) {
     const describedFiles = await describeTelegramOutFiles(state.telegramOutDirPath);

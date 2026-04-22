@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import type {
   CodexAdapter,
@@ -37,6 +39,8 @@ type SpawnCodex = (command: string, args: string[], options: SpawnOptions) => Pr
 const MAX_INSTRUCTIONS_CHARS = 16_000;
 const MAX_OUTPUT_LINE_BUFFER_BYTES = 1024 * 1024;
 const MAX_STDERR_TAIL_BYTES = 128 * 1024;
+export const CODEX_PROCESS_TURN_TIMEOUT_MS = 60 * 60_000;
+export const CODEX_PROCESS_INACTIVITY_TIMEOUT_MS = 30 * 60_000;
 
 type CodexJsonEvent =
   | {
@@ -218,6 +222,8 @@ export class ProcessCodexAdapter implements CodexAdapter {
   private readonly spawnCodex: SpawnCodex;
   private readonly instructionsPath: string | undefined;
   private readonly configPath: string | undefined;
+  private readonly turnTimeoutMs: number;
+  private readonly inactivityTimeoutMs: number | null;
 
   /**
    * First-pass adapter that runs Codex as a process.
@@ -239,6 +245,8 @@ export class ProcessCodexAdapter implements CodexAdapter {
     configPath?: string,
     engineHomePath?: string,
     private readonly workspacePath?: string,
+    turnTimeoutMs: number = CODEX_PROCESS_TURN_TIMEOUT_MS,
+    inactivityTimeoutMs: number | null = CODEX_PROCESS_INACTIVITY_TIMEOUT_MS,
   ) {
     const buildChildEnv = () => {
       const env = { ...process.env };
@@ -263,14 +271,35 @@ export class ProcessCodexAdapter implements CodexAdapter {
 
     this.instructionsPath = instructionsPath;
     this.configPath = configPath;
+    this.turnTimeoutMs = turnTimeoutMs;
+    this.inactivityTimeoutMs = inactivityTimeoutMs;
   }
 
   async createSession(chatId: number): Promise<CodexSessionHandle> {
     return { sessionId: `telegram-${chatId}` };
   }
 
-  async validateExternalSession(): Promise<void> {
-    throw new Error("codex thread validation unsupported");
+  async validateExternalSession(sessionId: string): Promise<void> {
+    const sessionIndexPath = path.join(this.resolveCodexHome(), "session_index.jsonl");
+    let raw: string;
+    try {
+      raw = await readFile(sessionIndexPath, "utf8");
+    } catch {
+      throw new Error(`codex process could not resume thread ${sessionId}`);
+    }
+
+    for (const line of raw.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
+      try {
+        const parsed = JSON.parse(line) as { id?: unknown };
+        if (parsed.id === sessionId) {
+          return;
+        }
+      } catch {
+        // Ignore malformed index rows and keep scanning.
+      }
+    }
+
+    throw new Error(`codex process could not resume thread ${sessionId}`);
   }
 
   private async loadApprovalMode(): Promise<ApprovalMode> {
@@ -368,8 +397,15 @@ export class ProcessCodexAdapter implements CodexAdapter {
     }
     const args = isLogicalTelegramSessionId(sessionId)
       ? ["exec", "--json", "--skip-git-repo-check", ...approvalFlags, ...engineFlags, "-"]
-      : ["exec", "resume", "--json", "--skip-git-repo-check", ...approvalFlags, ...engineFlags, sessionId, "-"];
-    const result = await this.runCodexJsonCommand(args, prompt, input.abortSignal, input.workspaceOverride);
+      : ["exec", "resume", "--json", "--skip-git-repo-check", "--all", ...approvalFlags, ...engineFlags, sessionId, "-"];
+    const result = await this.runCodexJsonCommand(
+      args,
+      prompt,
+      input.abortSignal,
+      input.workspaceOverride,
+      input.disableRuntimeTimeout ? null : this.turnTimeoutMs,
+      input.disableRuntimeTimeout ? null : this.inactivityTimeoutMs,
+    );
 
     if (result.state.lastTurnFailureMessage) {
       throw new Error(result.state.lastTurnFailureMessage);
@@ -390,7 +426,27 @@ export class ProcessCodexAdapter implements CodexAdapter {
     };
   }
 
-  private async runCodexJsonCommand(args: string[], prompt: string, abortSignal?: AbortSignal, cwdOverride?: string): Promise<{ state: CodexTurnState; stderrTail: string; exitCode: number | null }> {
+  private resolveCodexHome(): string {
+    if (this.childEnv.CODEX_HOME) {
+      return this.childEnv.CODEX_HOME;
+    }
+
+    const homeDir =
+      process.platform === "win32"
+        ? this.childEnv.USERPROFILE ?? this.childEnv.HOME ?? os.homedir()
+        : this.childEnv.HOME ?? this.childEnv.USERPROFILE ?? os.homedir();
+
+    return path.join(homeDir, ".codex");
+  }
+
+  private async runCodexJsonCommand(
+    args: string[],
+    prompt: string,
+    abortSignal?: AbortSignal,
+    cwdOverride?: string,
+    timeoutMs: number | null = this.turnTimeoutMs,
+    inactivityTimeoutMs: number | null = this.inactivityTimeoutMs,
+  ): Promise<{ state: CodexTurnState; stderrTail: string; exitCode: number | null }> {
     const invocation = buildCommandInvocation(this.codexExecutable, args);
     const child = this.spawnCodex(invocation.command, invocation.args, {
       stdio: ["pipe", "pipe", "pipe"],
@@ -405,13 +461,86 @@ export class ProcessCodexAdapter implements CodexAdapter {
       let stderrTail = "";
       let settled = false;
       const state = createTurnState();
+      let totalTimeout: ReturnType<typeof setTimeout> | undefined;
+      let inactivityTimeout: ReturnType<typeof setTimeout> | undefined;
+      let abortCleanup: (() => void) | undefined;
+
+      const clearTimers = () => {
+        totalTimeout && clearTimeout(totalTimeout);
+        inactivityTimeout && clearTimeout(inactivityTimeout);
+        totalTimeout = undefined;
+        inactivityTimeout = undefined;
+      };
+
+      const clearAbortListener = () => {
+        abortCleanup?.();
+        abortCleanup = undefined;
+      };
+
+      const rejectAndKill = (error: Error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearTimers();
+        clearAbortListener();
+        killProcessTree(child.pid);
+        reject(error);
+      };
+
+      const resetInactivityTimeout = () => {
+        inactivityTimeout && clearTimeout(inactivityTimeout);
+        inactivityTimeout = undefined;
+        if (inactivityTimeoutMs === null) {
+          return;
+        }
+
+        inactivityTimeout = setTimeout(() => {
+          rejectAndKill(
+            new Error(
+              `Codex process turn became inactive after ${Math.max(1, Math.round(inactivityTimeoutMs / 60_000))} minutes`,
+            ),
+          );
+        }, inactivityTimeoutMs);
+      };
+
+      if (timeoutMs !== null) {
+        totalTimeout = setTimeout(() => {
+          rejectAndKill(
+            new Error(`Codex process turn timed out after ${Math.max(1, Math.round(timeoutMs / 60_000))} minutes`),
+          );
+        }, timeoutMs);
+      }
+
+      resetInactivityTimeout();
+
+      child.once("error", (error) => {
+        if (!settled) {
+          settled = true;
+          clearTimers();
+          clearAbortListener();
+          reject(error);
+        }
+      });
+      child.once("close", (code) => {
+        if (!settled) {
+          settled = true;
+          clearTimers();
+          clearAbortListener();
+          const trailingLine = stdoutLineBuffer.trim();
+          if (trailingLine) {
+            updateTurnStateFromLine(state, trailingLine);
+          }
+          resolve({ state, stderrTail, exitCode: code });
+        }
+      });
 
       child.stdout?.on("data", (chunk) => {
+        resetInactivityTimeout();
         stdoutLineBuffer += chunk.toString();
         if (!settled && stdoutLineBuffer.length > MAX_OUTPUT_LINE_BUFFER_BYTES) {
-          settled = true;
-          killProcessTree(child.pid);
-          reject(new Error("Engine output exceeded maximum buffer size"));
+          rejectAndKill(new Error("Engine output exceeded maximum buffer size"));
           return;
         }
 
@@ -423,38 +552,24 @@ export class ProcessCodexAdapter implements CodexAdapter {
       });
 
       child.stderr?.on("data", (chunk) => {
+        resetInactivityTimeout();
         stderrTail = appendTail(stderrTail, chunk.toString(), MAX_STDERR_TAIL_BYTES);
       });
 
       if (abortSignal) {
         const onAbort = () => {
-          if (!settled) {
-            settled = true;
-            killProcessTree(child.pid);
-            reject(new Error("Task was stopped by user"));
-          }
+          rejectAndKill(new Error("Task was stopped by user"));
         };
-        if (abortSignal.aborted) { onAbort(); return; }
+        abortCleanup = () => abortSignal.removeEventListener("abort", onAbort);
         abortSignal.addEventListener("abort", onAbort, { once: true });
+        if (abortSignal.aborted) { onAbort(); return; }
       }
 
-      child.stdin?.end(prompt);
-      child.once("error", (error) => {
-        if (!settled) {
-          settled = true;
-          reject(error);
-        }
-      });
-      child.once("close", (code) => {
-        if (!settled) {
-          settled = true;
-          const trailingLine = stdoutLineBuffer.trim();
-          if (trailingLine) {
-            updateTurnStateFromLine(state, trailingLine);
-          }
-          resolve({ state, stderrTail, exitCode: code });
-        }
-      });
+      try {
+        child.stdin?.end(prompt);
+      } catch (error) {
+        rejectAndKill(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 }

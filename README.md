@@ -37,8 +37,10 @@
 - Agent collaboration now covers `/ask`, `/fan`, `/chain`, `/verify`, and a coordinator-led `crew` workflow.
 - The bridge now keeps structured `timeline.log.jsonl` and `crew-runs/*.json` state for better visibility and recovery.
 - `telegram service status`, `telegram service doctor`, `telegram timeline`, and `telegram dashboard` now expose much richer runtime health.
+- **v4.3.2** — tightens Telegram runtime state handling across both runtimes: Codex now defaults to the simpler process runtime, stale telegram-out outputs and engine/session mismatches are fenced off, and the remaining app-server shared-turn edge cases are hardened for optional use.
 - **v4.3.1** — preserves pending pairing codes when single-chat mode blocks redemption, refuses to turn multi-chat off while another chat is still pending pairing, and makes service startup/runtime config parsing use the same validated config reader.
-- **v4.3.0** — makes single-chat-per-instance the default, adds explicit `telegram access multi on|off` control, keeps Codex on `app-server` across YOLO modes, and exposes `/engine` switching directly in Telegram.
+- **Current default** — Codex instances now use the process runtime in Telegram for better stability under long-running bot sessions; Claude keeps its existing process runtime.
+- **v4.3.0** — makes single-chat-per-instance the default, adds explicit `telegram access multi on|off` control, and exposes `/engine` switching directly in Telegram.
 - **v4.2.0** — adds Claude auth smoke checks, stronger service environment diagnostics, and cleanup guidance for stale legacy launchd plists after removing the old autostart path.
 - **v4.1.0** — adds coordinator-led `crew` runs with persisted run state, plus a round of state/runtime hardening around schemas, file delivery, and shared state writes.
 - **v4.0.0** — the bus now speaks a compatibility-first `v1` protocol: protocol versioning, explicit capabilities, structured error codes, and `retryable` flags. See [`docs/bus-protocol.md`](./docs/bus-protocol.md).
@@ -333,7 +335,7 @@ That binds the current Telegram chat to the existing Codex thread. From then on:
 
 This is an attach flow, not a local session import: the thread stays server-side and the bridge only binds the known thread ID to the current chat.
 
-Note: external thread validation currently requires the Codex app-server runtime. If an instance is forced onto the legacy process runtime, `/resume thread <thread-id>` fails closed instead of guessing.
+Note: the default Codex process runtime validates `/resume thread <thread-id>` against the local Codex session index. Thread IDs unknown to the local machine still fail closed instead of being guessed.
 
 ---
 

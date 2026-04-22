@@ -38,8 +38,11 @@ type AppServerChildProcess = {
 type SpawnCodex = (command: string, args: string[], options: SpawnOptions) => AppServerChildProcess;
 const MAX_INSTRUCTIONS_CHARS = 16_000;
 const MAX_LINE_BUFFER_BYTES = 1024 * 1024;
+const MAX_DIAGNOSTIC_CHARS = 4_000;
 export const CODEX_APP_SERVER_TURN_TIMEOUT_MS = 60 * 60_000;
-export const CODEX_APP_SERVER_INACTIVITY_TIMEOUT_MS = 5 * 60_000;
+export const CODEX_APP_SERVER_INACTIVITY_TIMEOUT_MS = 15 * 60_000;
+export const CODEX_APP_SERVER_THREAD_READ_TIMEOUT_MS = 60_000;
+export const CODEX_APP_SERVER_WAIT_FOR_IDLE_TIMEOUT_MS = 30_000;
 type ApprovalMode = "normal" | "full-auto" | "bypass";
 
 type JsonRpcResponse = {
@@ -120,6 +123,8 @@ export class CodexAppServerAdapter implements CodexAdapter {
   private initializePromise: Promise<void> | null = null;
   private initializeKey: string | null = null;
   private lineBuffer = "";
+  private stderrTail = "";
+  private stdoutDiagnosticTail = "";
   private nextRequestId = 1;
   private readonly pendingRequests = new Map<number, PendingRequest>();
   private readonly nonBlockingRequestIds = new Set<number>();
@@ -138,6 +143,7 @@ export class CodexAppServerAdapter implements CodexAdapter {
     configPath?: string,
     private readonly turnTimeoutMs: number = CODEX_APP_SERVER_TURN_TIMEOUT_MS,
     private readonly turnInactivityTimeoutMs: number | null = CODEX_APP_SERVER_INACTIVITY_TIMEOUT_MS,
+    private readonly threadReadTimeoutMs: number = CODEX_APP_SERVER_THREAD_READ_TIMEOUT_MS,
   ) {
     const buildChildEnv = () => {
       const env = { ...process.env };
@@ -320,18 +326,20 @@ export class CodexAppServerAdapter implements CodexAdapter {
       this.handleStdout(chunk.toString());
     });
 
-    child.stderr?.on("data", () => {
-      // App-server emits JSON-RPC over stdout. stderr is ignored unless the process exits.
+    child.stderr?.on("data", (chunk) => {
+      // App-server emits JSON-RPC over stdout. Keep a bounded stderr tail so
+      // stalled-turn errors carry the underlying runtime context.
+      this.appendDiagnostic("stderr", chunk.toString());
     });
 
     child.once("error", (error) => {
-      this.failAllPending(error);
+      this.failAllPending(this.withDiagnostics(error instanceof Error ? error.message : String(error)));
+      this.resetChildState();
     });
 
     child.once("close", (code) => {
-      this.failAllPending(new Error(`codex app-server exited with code ${code}`));
-      this.child = null;
-      this.initializePromise = null;
+      this.failAllPending(this.withDiagnostics(`codex app-server exited with code ${code}`));
+      this.resetChildState();
     });
 
     await this.request("initialize", {
@@ -350,7 +358,7 @@ export class CodexAppServerAdapter implements CodexAdapter {
     this.lineBuffer += chunk;
 
     if (this.lineBuffer.length > MAX_LINE_BUFFER_BYTES) {
-      this.failAllPending(new Error("Engine output exceeded maximum buffer size"));
+      this.failAllPending(this.withDiagnostics("Engine output exceeded maximum buffer size"));
       this.child?.kill?.();
       return;
     }
@@ -368,6 +376,7 @@ export class CodexAppServerAdapter implements CodexAdapter {
     try {
       parsed = JSON.parse(line) as JsonRpcResponse;
     } catch {
+      this.appendDiagnostic("stdout", line);
       return;
     }
 
@@ -442,21 +451,21 @@ export class CodexAppServerAdapter implements CodexAdapter {
         return;
       }
 
+      pending.inactivityTimeout && clearTimeout(pending.inactivityTimeout);
+      pending.inactivityTimeout = undefined;
       this.pendingTurns.delete(threadId);
       const turnErrorMessage = this.readTurnErrorMessage(parsed.params?.turn);
       this.completingTurns += 1;
       if (turnErrorMessage) {
-        pending.reject(new Error(turnErrorMessage));
-        this.completingTurns -= 1;
-        this.notifyIdleWaitersIfIdle();
+        pending.reject(this.withDiagnostics(turnErrorMessage));
+        this.finishCompletingTurn();
         return;
       }
 
       void this.completeTurn(threadId, turnId, pending).catch((error) => {
-        pending.reject(error instanceof Error ? error : new Error(String(error)));
+        pending.reject(this.withDiagnostics(error instanceof Error ? error.message : String(error)));
       }).finally(() => {
-        this.completingTurns -= 1;
-        this.notifyIdleWaitersIfIdle();
+        this.finishCompletingTurn();
       });
       return;
     }
@@ -518,7 +527,7 @@ export class CodexAppServerAdapter implements CodexAdapter {
   private request(
     method: string,
     params: Record<string, unknown>,
-    options?: { idleBlocking?: boolean },
+    options?: { idleBlocking?: boolean; timeoutMs?: number; timeoutMessage?: string; destroyOnTimeout?: boolean },
   ): Promise<unknown> {
     const child = this.child;
     const stdin = child?.stdin;
@@ -530,6 +539,7 @@ export class CodexAppServerAdapter implements CodexAdapter {
     const id = this.nextRequestId++;
     return new Promise<unknown>((resolve, reject) => {
       let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
       const idleBlocking = options?.idleBlocking !== false;
       const resolveOnce = (value: unknown) => {
         if (settled) {
@@ -537,6 +547,10 @@ export class CodexAppServerAdapter implements CodexAdapter {
         }
 
         settled = true;
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = undefined;
+        }
         this.nonBlockingRequestIds.delete(id);
         resolve(value);
       };
@@ -546,6 +560,10 @@ export class CodexAppServerAdapter implements CodexAdapter {
         }
 
         settled = true;
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = undefined;
+        }
         this.pendingRequests.delete(id);
         this.nonBlockingRequestIds.delete(id);
         this.notifyIdleWaitersIfIdle();
@@ -559,6 +577,20 @@ export class CodexAppServerAdapter implements CodexAdapter {
         resolve: resolveOnce,
         reject: rejectOnce,
       });
+      if (typeof options?.timeoutMs === "number" && options.timeoutMs > 0) {
+        timeout = setTimeout(() => {
+          rejectOnce(
+            this.withDiagnostics(
+              options.timeoutMessage ?? `codex app-server ${method} timed out after ${options.timeoutMs}ms`,
+            ),
+          );
+          if (options.destroyOnTimeout) {
+            queueMicrotask(() => {
+              this.destroy();
+            });
+          }
+        }, options.timeoutMs);
+      }
 
       try {
         stdin.write(
@@ -662,7 +694,7 @@ export class CodexAppServerAdapter implements CodexAdapter {
         resolve: resolveAndCleanup,
         reject: rejectAndCleanup,
       };
-      const abortTurn = (error: Error) => {
+      const abortTurn = (error: Error, options?: { destroyChild?: boolean }) => {
         const pendingTurnState = this.pendingTurns.get(threadId);
         if (pendingTurnState && pendingTurnState !== pendingTurn) {
           return;
@@ -671,18 +703,21 @@ export class CodexAppServerAdapter implements CodexAdapter {
         if (pendingTurnState === pendingTurn) {
           this.pendingTurns.delete(threadId);
         }
+        this.loadedThreads.delete(threadId);
         pendingTurn.reject(error);
-        // Codex app-server exposes no per-turn cancel RPC today, so a best-effort
-        // turn abort means recycling the whole child process.
-        this.destroy();
+        this.notifyIdleWaitersIfIdle();
+        if (options?.destroyChild) {
+          this.destroy();
+        }
       };
 
       if (timeoutMs !== null) {
         pendingTurn.timeout = setTimeout(() => {
           abortTurn(
-            new Error(
+            this.withDiagnostics(
               `${turnErrorPrefix} timed out after ${Math.max(1, Math.round(timeoutMs / 60_000))} minutes`,
             ),
+            { destroyChild: true },
           );
         }, timeoutMs);
       }
@@ -718,9 +753,11 @@ export class CodexAppServerAdapter implements CodexAdapter {
         idleBlocking: false,
       }).catch((error) => {
         const pendingTurnState = this.pendingTurns.get(threadId);
-        if (pendingTurnState === pendingTurn) {
-          this.pendingTurns.delete(threadId);
+        if (pendingTurnState !== pendingTurn) {
+          this.notifyIdleWaitersIfIdle();
+          return;
         }
+        this.pendingTurns.delete(threadId);
         this.notifyIdleWaitersIfIdle();
         pendingTurn.reject(error instanceof Error ? error : new Error(String(error)));
       });
@@ -765,7 +802,7 @@ export class CodexAppServerAdapter implements CodexAdapter {
       }
 
       pending.reject(
-        new Error(
+        this.withDiagnostics(
           `Codex app-server turn became inactive after ${Math.max(1, Math.round(timeoutMs / 60_000))} minutes`,
         ),
       );
@@ -801,6 +838,10 @@ export class CodexAppServerAdapter implements CodexAdapter {
     const result = (await this.request("thread/read", {
       threadId,
       includeTurns: true,
+    }, {
+      timeoutMs: this.threadReadTimeoutMs,
+      timeoutMessage: `Codex app-server thread/read timed out after ${Math.max(1, Math.round(this.threadReadTimeoutMs / 1000))} seconds`,
+      destroyOnTimeout: true,
     })) as {
       thread?: {
         turns?: Array<{
@@ -843,10 +884,8 @@ export class CodexAppServerAdapter implements CodexAdapter {
 
   destroy(): void {
     this.child?.kill?.();
-    this.failAllPending(new Error("Adapter destroyed"));
-    this.child = null;
-    this.initializePromise = null;
-    this.initializeKey = null;
+    this.failAllPending(this.withDiagnostics("Adapter destroyed"));
+    this.resetChildState();
   }
 
   private failAllPending(error: Error): void {
@@ -879,8 +918,17 @@ export class CodexAppServerAdapter implements CodexAdapter {
       return;
     }
 
-    await new Promise<void>((resolve) => {
-      this.idleWaiters.add(resolve);
+    await new Promise<void>((resolve, reject) => {
+      const waiter = () => {
+        clearTimeout(timer);
+        this.idleWaiters.delete(waiter);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        this.idleWaiters.delete(waiter);
+        reject(new Error(`Codex app-server did not become idle within ${CODEX_APP_SERVER_WAIT_FOR_IDLE_TIMEOUT_MS}ms`));
+      }, CODEX_APP_SERVER_WAIT_FOR_IDLE_TIMEOUT_MS);
+      this.idleWaiters.add(waiter);
     });
   }
 
@@ -894,5 +942,60 @@ export class CodexAppServerAdapter implements CodexAdapter {
     for (const waiter of waiters) {
       waiter();
     }
+  }
+
+  private finishCompletingTurn(): void {
+    this.completingTurns = Math.max(0, this.completingTurns - 1);
+    this.notifyIdleWaitersIfIdle();
+  }
+
+  private resetChildState(): void {
+    this.child = null;
+    this.initializePromise = null;
+    this.initializeKey = null;
+    this.lineBuffer = "";
+    this.stderrTail = "";
+    this.stdoutDiagnosticTail = "";
+  }
+
+  private appendDiagnostic(channel: "stderr" | "stdout", chunk: string): void {
+    const normalized = chunk.trim();
+    if (!normalized) {
+      return;
+    }
+
+    if (channel === "stderr") {
+      this.stderrTail = this.appendTail(this.stderrTail, normalized);
+      return;
+    }
+
+    this.stdoutDiagnosticTail = this.appendTail(this.stdoutDiagnosticTail, normalized);
+  }
+
+  private appendTail(existing: string, chunk: string): string {
+    const next = existing ? `${existing}\n${chunk}` : chunk;
+    return next.length > MAX_DIAGNOSTIC_CHARS
+      ? next.slice(next.length - MAX_DIAGNOSTIC_CHARS)
+      : next;
+  }
+
+  private withDiagnostics(message: string): Error {
+    if (message.includes("[engine diagnostics]")) {
+      return new Error(message);
+    }
+
+    const sections: string[] = [];
+    if (this.stderrTail) {
+      sections.push(`stderr:\n${this.stderrTail}`);
+    }
+    if (this.stdoutDiagnosticTail) {
+      sections.push(`stdout:\n${this.stdoutDiagnosticTail}`);
+    }
+
+    if (sections.length === 0) {
+      return new Error(message);
+    }
+
+    return new Error(`${message}\n\n[engine diagnostics]\n${sections.join("\n\n")}`);
   }
 }

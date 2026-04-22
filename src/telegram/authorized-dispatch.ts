@@ -69,6 +69,7 @@ export interface AuthorizedTelegramDispatchDeps {
     text: string,
     inboxDir: string,
     workspaceOverride: string | undefined,
+    requestOutputDir: string | undefined,
     locale: Locale,
   ) => Promise<number>;
   sendTelegramOutFile: (chatId: number, filename: string, contents: Uint8Array) => Promise<void>;
